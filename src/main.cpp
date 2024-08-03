@@ -1,25 +1,6 @@
-// This code is the combination of multiple works by others:
-// 1. Original code for the Space Mushroom by Shiura on Thingiverse: https://www.thingiverse.com/thing:5739462
-//    The next two from the comments on the instructables page: https://www.instructables.com/Space-Mushroom-Full-6-DOFs-Controller-for-CAD-Appl/
-//    and the comments of Thingiverse: https://www.thingiverse.com/thing:5739462/comments
-// 2. Code to emulate a 3DConnexion Space Mouse by jfedor: https://pastebin.com/gQxUrScV
-// 3. This code was then remixed by BennyBWalker to include the above two sketches: https://pastebin.com/erhTgRBH
-// 4. Four joystick remix code by fdmakara: https://www.thingiverse.com/thing:5817728
-// My work invloves mixing all of these. The basis is fdmakara's four joystick movement logic, with jfedor/BennyBWalker's HID SpaceMouse emulation.
-// The four joystick logic sketch was setup for the joystick library instead of HID, so elements of this were omitted where not needed.
-// The outputs were jumbled no matter how I plugged them in, so I spent a lot of time adding debugging code to track exactly what was happening.
-// On top of this, I have added more control of speed/direction and comments/links to informative resources to try and explain what is happening in each phase.
+// This code is bases of Teaching Tech's project (which is also based on varios people, see below)
+// https://www.printables.com/model/864950-open-source-spacemouse-space-mushroom-remix
 
-// Spacemouse emulation
-// I followed the instructions here from nebhead: https://gist.github.com/nebhead/c92da8f1a8b476f7c36c032a0ac2592a
-// with two key differences:
-// 1. I changed the word 'DaemonBite' to 'Spacemouse' in all references.
-// 2. I changed the VID and PID values as per jfedor's instructions: vid=0x256f, pid=0xc631 (SpaceMouse Pro Wireless (cabled))
-// When compiling and uploading, I select Arduino AVR boards (in Sketchbook) > Spacemouse and then the serial port.
-// You will also need to download and install the 3DConnexion software: https://3dconnexion.com/us/drivers-application/3dxware-10/
-// If all goes well, the 3DConnexion software will show a SpaceMouse Pro wireless when the Arduino is connected.
-
-// Include inbuilt Arduino HID library by NicoHood: https://github.com/NicoHood/HID
 #include "HID.h"
 
 // Debugging
@@ -29,7 +10,7 @@
 // 3: Output centered joystick values. Filtered for deadzone. Approx -500 to +500, locked to zero at idle.
 // 4: Output translation and rotation values. Approx -800 to 800 depending on the parameter.
 // 5: Output debug 4 and 5 side by side for direct cause and effect reference.
-int debug = 5;
+int debug = 6;
 
 // Direction
 // Modify the direction of translation/rotation depending on preference. This can also be done per application in the 3DConnexion software.
@@ -126,12 +107,26 @@ static const uint8_t _hidReportDescriptor[] PROGMEM = {
 // Centerpoint variable to be populated during setup routine.
 int centerPoints[8];
 
+int maxPoints[8] = {512, 512, 512, 512, 512, 512, 512, 512};
+int minPoints[8] = {512, 512, 512, 512, 512, 512, 512, 512};
+
 // Function to read and store analogue voltages for each joystick axis.
 void readAllFromJoystick(int *rawReads)
 {
     for (int i = 0; i < 8; i++)
     {
         rawReads[i] = analogRead(PINLIST[i]);
+
+        // Auto max/min check
+        if (rawReads[i] > maxPoints[i])
+        {
+            maxPoints[i] = rawReads[i];
+        }
+
+        if (rawReads[i] < minPoints[i])
+        {
+            minPoints[i] = rawReads[i];
+        }
     }
 }
 
@@ -143,26 +138,54 @@ void setup()
     // Begin Seral for debugging
     Serial.begin(250000);
     delay(100);
+    
+    
     // Read idle/centre positions for joysticks.
     readAllFromJoystick(centerPoints);
-    readAllFromJoystick(centerPoints); 
+    for (int p=0; p<100; p++)
+    {
+        delay(3);
+
+        int newCenterPoints[8];
+        readAllFromJoystick(newCenterPoints);
+
+        // Filter in new center
+        for (int i = 0; i < 8; i++)
+        {
+            centerPoints[i] = (centerPoints[i] + newCenterPoints[i]) / 2;
+        }
+    }
 }
 
 // Function to send translation and rotation data to the 3DConnexion software using the HID protocol outlined earlier. Two sets of data are sent: translation and then rotation.
 // For each, a 16bit integer is split into two using bit shifting. The first is mangitude and the second is direction.
 void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int16_t z)
 {
-    uint8_t trans[6] = {x & 0xFF, x >> 8, y & 0xFF, y >> 8, z & 0xFF, z >> 8};
+    uint8_t trans[6];
+    trans[0] = (uint8_t)(x & 0xFF);
+    trans[1] = (uint8_t)(x >> 8);
+    trans[2] = (uint8_t)(y & 0xFF);
+    trans[3] = (uint8_t)(y >> 8);
+    trans[4] = (uint8_t)(z & 0xFF);
+    trans[5] = (uint8_t)(z >> 8);
     HID().SendReport(1, trans, 6);
-    uint8_t rot[6] = {rx & 0xFF, rx >> 8, ry & 0xFF, ry >> 8, rz & 0xFF, rz >> 8};
+
+    uint8_t rot[6];
+    rot[0] = (uint8_t)(rx & 0xFF);
+    rot[1] = (uint8_t)(rx >> 8);
+    rot[2] = (uint8_t)(ry & 0xFF);
+    rot[3] = (uint8_t)(ry >> 8);
+    rot[4] = (uint8_t)(rz & 0xFF);
+    rot[5] = (uint8_t)(rz >> 8);
     HID().SendReport(2, rot, 6);
 }
 
-void loop()
+void old_loop()
 {
     int rawReads[8], centered[8];
     // Joystick values are read. 0-1023
     readAllFromJoystick(rawReads);
+
     // Report back 0-1023 raw ADC 10-bit values if enabled
     if (debug == 1)
     {
@@ -435,4 +458,577 @@ void loop()
     //delay(1);
     send_command(rotX-1, rotZ-1, rotY-1, transX-1, transZ-1, transY-1);
     //delay(1);
+}
+
+
+
+
+void loop()
+{
+    const float deadZone = 0.05;
+
+    const float f_invX = 1.0f;  // pan left/right
+    const float f_invY = 1.0f;  // pan up/down
+    const float f_invZ = -1.0f;   // zoom in/out
+    const float f_invRX = -1.0f;  // Rotate around X axis (tilt front/back)
+    const float f_invRY = 1.0f; // Rotate around Y axis (tilt left/right)
+    const float f_invRZ = -1.0f;  // Rotate around Z axis (twist left/right)
+
+    const float boostTX = 1.3f;
+    const float boostTY = 1.3f;
+    const float boostTZ = 1.3f;
+
+    const float boostRX = 1.5f;
+    const float boostRY = 1.5f;
+    const float boostRZ = 1.5f;
+
+    // Output
+    float transX, transY, transZ, rotX, rotY, rotZ;
+
+    // Scale [0...1023]
+    int rawReads[8];
+
+    // Scale [-1...1]
+    float centered[8];
+
+
+    // Joystick values are read. 0-1023
+    readAllFromJoystick(rawReads);
+
+    // Subtract centre position from measured position to determine movement.
+    // Change scale to [-1...1]
+    for (int i = 0; i < 8; i++)
+    {
+        centered[i] = (rawReads[i] - centerPoints[i]);
+
+        if (centered[i] >= 0)
+        {
+            centered[i] = centered[i] / (float)(1024.0f - centerPoints[i]);
+        }
+        else
+        {
+            centered[i] = centered[i] / (float)(centerPoints[i]);
+        }
+    }
+
+    if (debug == 2)
+    {
+        // Report centered joystick values if enabled. Values should be approx -500 to +500, jitter around 0 at idle.
+        Serial.print("AX:");
+        Serial.print(centered[0]);
+        Serial.print(",");
+        Serial.print("AY:");
+        Serial.print(centered[1]);
+        Serial.print(",");
+        Serial.print("BX:");
+        Serial.print(centered[2]);
+        Serial.print(",");
+        Serial.print("BY:");
+        Serial.print(centered[3]);
+        Serial.print(",");
+        Serial.print("CX:");
+        Serial.print(centered[4]);
+        Serial.print(",");
+        Serial.print("CY:");
+        Serial.print(centered[5]);
+        Serial.print(",");
+        Serial.print("DX:");
+        Serial.print(centered[6]);
+        Serial.print(",");
+        Serial.print("DY:");
+        Serial.print("           ");
+        Serial.print("cAX:");
+        Serial.print(centerPoints[0]);
+        Serial.print(",");
+        Serial.print("cAY:");
+        Serial.print(centerPoints[1]);
+        Serial.print(",");
+        Serial.print("cBX:");
+        Serial.print(centerPoints[2]);
+        Serial.print(",");
+        Serial.print("cBY:");
+        Serial.print(centerPoints[3]);
+        Serial.print(",");
+        Serial.print("cCX:");
+        Serial.print(centerPoints[4]);
+        Serial.print(",");
+        Serial.print("cCY:");
+        Serial.print(centerPoints[5]);
+        Serial.print(",");
+        Serial.print("cDX:");
+        Serial.print(centerPoints[6]);
+        Serial.print(",");
+        Serial.print("cDY:");
+        Serial.println(centerPoints[7]);
+    }
+
+    // Apply deadzone
+    for (int i = 0; i < 8; i++)
+    {
+        if (fabs(centered[i]) < deadZone)
+        {
+            centered[i] = 0.0f;
+        }
+    }
+
+    if (debug == 3)
+    {
+        // Report centered joystick values. Filtered for deadzone. Approx -500 to +500, locked to zero at idle
+        Serial.print("AX:");
+        Serial.print(centered[0]);
+        Serial.print(",");
+        Serial.print("AY:");
+        Serial.print(centered[1]);
+        Serial.print(",");
+        Serial.print("BX:");
+        Serial.print(centered[2]);
+        Serial.print(",");
+        Serial.print("BY:");
+        Serial.print(centered[3]);
+        Serial.print(",");
+        Serial.print("CX:");
+        Serial.print(centered[4]);
+        Serial.print(",");
+        Serial.print("CY:");
+        Serial.print(centered[5]);
+        Serial.print(",");
+        Serial.print("DX:");
+        Serial.print(centered[6]);
+        Serial.print(",");
+        Serial.print("DY:");
+        Serial.println(centered[7]);
+    }
+
+
+    // Calculate translation and rotation based on the 4 joysticks
+    transX = -(-centered[CY] + centered[AY]) / 2.0f;
+    transY = (-centered[BY] + centered[DY]) / 2.0f;
+    transZ = (-centered[AX] - centered[BX] - centered[CX] - centered[DX]) / 4.0f;
+
+    rotX = (-centered[AX] + centered[CX]) / 2.0;
+    rotY = (+centered[BX] - centered[DX]) / 2.0f;
+    rotZ = (+centered[AY] + centered[BY] + centered[CY] + centered[DY]) / 4.0f;
+
+
+    // Boost some values as we are not using the full range of the joysticks (some times)
+    // Boost and invert any results
+    transX = constrain(boostTX*f_invX*transX, -1.0f, 1.0f);
+    transY = constrain(boostTY*f_invY*transY, -1.0f, 1.0f);
+    transZ = constrain(boostTZ*f_invZ*transZ, -1.0f, 1.0f);
+
+    rotX = constrain(boostRX*f_invRX*rotX, -1.0f, 1.0f);
+    rotY = constrain(boostRY*f_invRY*rotY, -1.0f, 1.0f);
+    rotZ = constrain(boostRZ*f_invRZ*rotZ, -1.0f, 1.0f);
+  
+
+    if (debug == 4)
+    {
+        Serial.print("TX:");
+        Serial.print(transX);
+        Serial.print(",");
+        Serial.print("TY:");
+        Serial.print(transY);
+        Serial.print(",");
+        Serial.print("TZ:");
+        Serial.print(transZ);
+        Serial.print(",");
+        Serial.print("RX:");
+        Serial.print(rotX);
+        Serial.print(",");
+        Serial.print("RY:");
+        Serial.print(rotY);
+        Serial.print(",");
+        Serial.print("RZ:");
+        Serial.println(rotZ);
+    }
+
+    if (debug == 5)
+    {
+        // Report debug 4 and 5 info side by side for direct reference if enabled. Very useful if you need to alter which inputs are used in the arithmatic above.
+        Serial.print("AX:");
+        Serial.print(centered[0]);
+        Serial.print(",");
+        Serial.print("AY:");
+        Serial.print(centered[1]);
+        Serial.print(",");
+        Serial.print("BX:");
+        Serial.print(centered[2]);
+        Serial.print(",");
+        Serial.print("BY:");
+        Serial.print(centered[3]);
+        Serial.print(",");
+        Serial.print("CX:");
+        Serial.print(centered[4]);
+        Serial.print(",");
+        Serial.print("CY:");
+        Serial.print(centered[5]);
+        Serial.print(",");
+        Serial.print("DX:");
+        Serial.print(centered[6]);
+        Serial.print(",");
+        Serial.print("DY:");
+        Serial.print(centered[7]);
+        Serial.print(" || ");
+        Serial.print("TX:");
+        Serial.print(transX);
+        Serial.print(",");
+        Serial.print("TY:");
+        Serial.print(transY);
+        Serial.print(",");
+        Serial.print("TZ:");
+        Serial.print(transZ);
+        Serial.print(",");
+        Serial.print("RX:");
+        Serial.print(rotX);
+        Serial.print(",");
+        Serial.print("RY:");
+        Serial.print(rotY);
+        Serial.print(",");
+        Serial.print("RZ:");
+        Serial.print(rotZ);
+
+/*        Serial.print(" || ");
+        Serial.print("AX:");
+        Serial.print(minPoints[0]);
+        Serial.print(",");
+        Serial.print(maxPoints[0]);
+        Serial.print(" AY:");
+        Serial.print(minPoints[1]);
+        Serial.print(",");
+        Serial.print(maxPoints[1]);
+
+        Serial.print(" BX:");
+        Serial.print(minPoints[2]);
+        Serial.print(",");
+        Serial.print(maxPoints[2]);
+        Serial.print(" BY:");
+        Serial.print(minPoints[3]);
+        Serial.print(",");
+        Serial.print(maxPoints[3]);
+
+        Serial.print(" CX:");
+        Serial.print(minPoints[4]);
+        Serial.print(",");
+        Serial.print(maxPoints[4]);
+        Serial.print(" CY:");
+        Serial.print(minPoints[5]);
+        Serial.print(",");
+        Serial.print(maxPoints[5]);
+
+        Serial.print(" DX:");
+        Serial.print(minPoints[6]);
+        Serial.print(",");
+        Serial.print(maxPoints[6]);
+        Serial.print(" DY:");
+        Serial.print(minPoints[7]);
+        Serial.print(",");
+        Serial.print(maxPoints[7]);
+*/
+        Serial.println("");
+
+    }
+
+
+    // Single command mode?
+    const float minMove = 0.16f;
+    if (fabs(rotZ) > minMove)
+    {
+        rotY = 0.0f;
+        rotX = 0.0f;
+
+        transX = 0.0f;
+        transY = 0.0f;
+        transZ = 0.0f;
+    }
+    else
+    {
+        rotZ = 0.0f;
+    }
+
+
+    if (fabs(transZ) > minMove)
+    {
+        rotY = 0.0f;
+        rotX = 0.0f;
+        rotZ = 0.0f;
+
+        transX = 0.0f;
+        transY = 0.0f;
+    }
+    else
+    {
+        transZ = 0.0f;
+    }
+
+/*    else if (fabs(transZ) > minMove)
+    {
+        rotX = 0.0f;
+        rotY = 0.0f;
+        rotZ = 0.0f;
+
+        transX = 0.0f;
+        transY = 0.0f;
+    }
+    else if (fabs(transX) > minMove)
+    {
+        rotX = 0.0f;
+        rotY = 0.0f;
+        rotZ = 0.0f;
+
+        transY = 0.0f;
+        transZ = 0.0f;
+    }
+    else if (fabs(transY) > minMove)
+    {
+        rotX = 0.0f;
+        rotY = 0.0f;
+        rotZ = 0.0f;
+
+        transX = 0.0f;
+        transZ = 0.0f;
+    }
+    else if (fabs(rotY) > minMove)
+    {
+        rotZ = 0.0f;
+        rotX = 0.0f;
+
+        transX = 0.0f;
+        transY = 0.0f;
+        transZ = 0.0f;
+    }
+    else if (fabs(rotX) > minMove)
+    {
+        rotZ = 0.0f;
+        rotY = 0.0f;
+
+        transX = 0.0f;
+        transY = 0.0f;
+        transZ = 0.0f;
+    }
+*/
+
+
+
+
+    // Last step is to convert values to HID values (-32767...32767)
+    int16_t tx = (int16_t)(transX * 32767.0f);
+    int16_t ty = (int16_t)(transY * 32767.0f);
+    int16_t tz = (int16_t)(transZ * 32767.0f);
+
+    int16_t rx = (int16_t)(rotX * 32767.0f);
+    int16_t ry = (int16_t)(rotY * 32767.0f);
+    int16_t rz = (int16_t)(rotZ * 32767.0f);
+
+    if (debug == 6)
+    {
+        Serial.print("TX:");
+        Serial.print(tx);
+        Serial.print(",");
+        Serial.print("TY:");
+        Serial.print(ty);
+        Serial.print(",");
+        Serial.print("TZ:");
+        Serial.print(tz);
+        Serial.print(",");
+        Serial.print("RX:");
+        Serial.print(rx);
+        Serial.print(",");
+        Serial.print("RY:");
+        Serial.print(ry);
+        Serial.print(",");
+        Serial.print("RZ:");
+        Serial.print(rz);
+        Serial.println("");
+    }
+
+    // Send data to the 3DConnexion software.
+    send_command(rx, rz, ry, tx, tz, ty);
+
+    // Under Linux, using "spacenavd", it seems like the reports must "differ" for a report to be used,
+    // So, always send the rerport, but very close the old value so that an event is tiggered
+    send_command(rx-1, rz-1, ry-1, tx-1, tz-1, ty-1);
+
+
+#if 0
+
+
+    // Doing all through arithmetic contribution by fdmakara
+    // Integer has been changed to 16 bit int16_t to match what the HID protocol expects.
+    int16_t transX, transY, transZ, rotX, rotY, rotZ; // Declare movement variables at 16 bit integers
+    // Original fdmakara calculations
+    // transX = (-centered[AX] +centered[CX])/1;
+    // transY = (-centered[BX] +centered[DX])/1;
+    // transZ = (-centered[AY] -centered[BY] -centered[CY] -centered[DY])/2;
+    // rotX = (-centered[AY] +centered[CY])/2;
+    // rotY = (+centered[BY] -centered[DY])/2;
+    // rotZ = (+centered[AX] +centered[BX] +centered[CX] +centered[DX])/4;
+    // My altered calculations based on debug output. Final divisor can be changed to alter sensitivity for each axis.
+
+    transX = -(-centered[CY] + centered[AY]) / 1;
+    transY = (-centered[BY] + centered[DY]) / 1;
+    if ((abs(centered[AX]) > DEADZONE) && (abs(centered[BX]) > DEADZONE) && (abs(centered[CX]) > DEADZONE) && (abs(centered[DX]) > DEADZONE))
+    {
+        transZ = (-centered[AX] - centered[BX] - centered[CX] - centered[DX]) / 2;
+        transX = 0;
+        transY = 0;
+    }
+    else
+    {
+        transZ = 0;
+    }
+    rotX = (-centered[AX] + centered[CX]) / 1;
+    rotY = (+centered[BX] - centered[DX]) / 1;
+    if ((abs(centered[AY]) > DEADZONE) && (abs(centered[BY]) > DEADZONE) && (abs(centered[CY]) > DEADZONE) && (abs(centered[DY]) > DEADZONE))
+    {
+        rotZ = (+centered[AY] + centered[BY] + centered[CY] + centered[DY]) / 2;
+        rotX = 0;
+        rotY = 0;
+    }
+    else
+    {
+        rotZ = 0;
+    }
+
+    // Alter speed to suit user preference - Use 3DConnexion slider instead for V2.
+    // transX = transX/100*speed;
+    // transY = transY/100*speed;
+    // transZ = transZ/100*speed;
+    // rotX = rotX/100*speed;
+    // rotY = rotY/100*speed;
+    // rotZ = rotZ/100*speed;
+    // Invert directions if needed
+    if (invX == true)
+    {
+        transX = transX * -1;
+    };
+    if (invY == true)
+    {
+        transY = transY * -1;
+    };
+    if (invZ == true)
+    {
+        transZ = transZ * -1;
+    };
+    if (invRX == true)
+    {
+        rotX = rotX * -1;
+    };
+    if (invRY == true)
+    {
+        rotY = rotY * -1;
+    };
+    if (invRZ == true)
+    {
+        rotZ = rotZ * -1;
+    };
+
+
+    // Special case... 
+    // if (abs(rotZ) > 400)
+    // {
+    //     transX = 0;
+    //     transY = 0;
+    //     transZ = 0;
+    //     rotY = 0;
+    //     rotX = 0;
+    // }
+
+    if ( (abs(transX) < DEADZONE) && (abs(transY) < DEADZONE) && (abs(transZ) < DEADZONE) )
+    {
+        rotX = map(rotX, -1024, 1024, -32768, 32767);
+        rotZ = map(rotZ, -1024, 1024, -32768, 32767);
+        rotY = map(rotY, -1024, 1024, -32768, 32767);
+    }
+
+    transX = map(transX, -1024, 1024, -32768, 32767);
+    transZ = map(transZ, -1024, 1024, -32768, 32767);
+    transY = map(transY, -1024, 1024, -32768, 32767);
+
+    float transScale = 0.25f;
+    float rotScale = 0.25f;
+
+    transX = transScale*transX;
+    transY = transScale*transY;
+    transZ = transScale*transZ;
+
+    rotX = rotScale*rotX;
+    rotY = rotScale*rotY;
+    rotZ = rotScale*rotZ;
+
+    // Report translation and rotation values if enabled. Approx -800 to 800 depending on the parameter.
+    if (debug == 4)
+    {
+        Serial.print("TX:");
+        Serial.print(transX);
+        Serial.print(",");
+        Serial.print("TY:");
+        Serial.print(transY);
+        Serial.print(",");
+        Serial.print("TZ:");
+        Serial.print(transZ);
+        Serial.print(",");
+        Serial.print("RX:");
+        Serial.print(rotX);
+        Serial.print(",");
+        Serial.print("RY:");
+        Serial.print(rotY);
+        Serial.print(",");
+        Serial.print("RZ:");
+        Serial.println(rotZ);
+    }
+    // Report debug 4 and 5 info side by side for direct reference if enabled. Very useful if you need to alter which inputs are used in the arithmatic above.
+    if (debug == 5)
+    {
+        Serial.print("AX:");
+        Serial.print(centered[0]);
+        Serial.print(",");
+        Serial.print("AY:");
+        Serial.print(centered[1]);
+        Serial.print(",");
+        Serial.print("BX:");
+        Serial.print(centered[2]);
+        Serial.print(",");
+        Serial.print("BY:");
+        Serial.print(centered[3]);
+        Serial.print(",");
+        Serial.print("CX:");
+        Serial.print(centered[4]);
+        Serial.print(",");
+        Serial.print("CY:");
+        Serial.print(centered[5]);
+        Serial.print(",");
+        Serial.print("DX:");
+        Serial.print(centered[6]);
+        Serial.print(",");
+        Serial.print("DY:");
+        Serial.print(centered[7]);
+        Serial.print("||");
+        Serial.print("TX:");
+        Serial.print(transX);
+        Serial.print(",");
+        Serial.print("TY:");
+        Serial.print(transY);
+        Serial.print(",");
+        Serial.print("TZ:");
+        Serial.print(transZ);
+        Serial.print(",");
+        Serial.print("RX:");
+        Serial.print(rotX);
+        Serial.print(",");
+        Serial.print("RY:");
+        Serial.print(rotY);
+        Serial.print(",");
+        Serial.print("RZ:");
+        Serial.println(rotZ);
+    }
+
+
+    // Send data to the 3DConnexion software.
+    // The correct order for me was determined after trial and error
+    send_command(rotX, rotZ, rotY, transX, transZ, transY);
+    //delay(1);
+    send_command(rotX-1, rotZ-1, rotY-1, transX-1, transZ-1, transY-1);
+    //delay(1);
+
+#endif
 }
