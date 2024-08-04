@@ -155,8 +155,8 @@ void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int1
 }
 
 // Movement thresholds
-const float trans_threshold[3] = {0.1f, 0.1f, 0.01f};
-const float rot_threshold[3] = {0.05f, 0.05f, 0.03f};
+const float trans_threshold[3] = {0.1f, 0.1f, 0.03f};
+const float rot_threshold[3] = {0.03f, 0.03f, 0.03f};
 
 // Deadband threshold
 //#define DEADBAND_THRESHOLD 0.05f
