@@ -3,29 +3,6 @@
 
 #include "HID.h"
 
-// Debugging
-// 0: Debugging off. Set to this once everything is working.
-// 1: Output raw joystick values. 0-1023 raw ADC 10-bit values
-// 2: Output centered joystick values. Values should be approx -500 to +500, jitter around 0 at idle.
-// 3: Output centered joystick values. Filtered for deadzone. Approx -500 to +500, locked to zero at idle.
-// 4: Output translation and rotation values. Approx -800 to 800 depending on the parameter.
-// 5: Output debug 4 and 5 side by side for direct cause and effect reference.
-int debug = 6;
-
-// Direction
-// Modify the direction of translation/rotation depending on preference. This can also be done per application in the 3DConnexion software.
-// Switch between true/false as desired.
-bool invX = false;  // pan left/right
-bool invY = false;  // pan up/down
-bool invZ = true;   // zoom in/out
-bool invRX = true;  // Rotate around X axis (tilt front/back)
-bool invRY = false; // Rotate around Y axis (tilt left/right)
-bool invRZ = true;  // Rotate around Z axis (twist left/right)
-
-// Speed - Had to be removed when the V2 shorter range of motion. The logic reduced sensitivity on small movements. Use 3DConnexion slider instead for V2.
-// Modify to change sensitibity/speed. Default and maximum 100. Works like a percentage ie. 50 is half as fast as default. This can also be done per application in the 3DConnexion software.
-// int16_t speed = 100;
-
 // Default Assembly when looking from above:
 //    C           Y+
 //    |           .
@@ -45,8 +22,6 @@ int PINLIST[8] = {
     A9, // X-axis D
     A8  // Y-axis D
 };
-// Deadzone to filter out unintended movements. Increase if the mouse has small movements when it should be idle or the mouse is too senstive to subtle movements.
-int DEADZONE = 3; // Recommended to have this as small as possible for V2 to allow smaller knob range of motion.
 
 // This portion sets up the communication with the 3DConnexion software. The communication protocol is created here.
 // hidReportDescriptor webpage can be found here: https://eleccelerator.com/tutorial-about-usb-hid-report-descriptors/
@@ -138,11 +113,10 @@ void setup()
     // Begin Seral for debugging
     Serial.begin(250000);
     delay(100);
-    
-    
+
     // Read idle/centre positions for joysticks.
     readAllFromJoystick(centerPoints);
-    for (int p=0; p<100; p++)
+    for (int p = 0; p < 100; p++)
     {
         delay(3);
 
@@ -180,317 +154,126 @@ void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int1
     HID().SendReport(2, rot, 6);
 }
 
-void old_loop()
+// Deadband threshold
+#define DEADBAND_THRESHOLD 0.05f
+
+// Low-pass filter constants
+#define ALPHA 0.1f // Smoothing factor (0 < ALPHA < 1)
+
+// Function to apply a deadband filter
+void apply_deadband(float *x, float *y)
 {
-    int rawReads[8], centered[8];
-    // Joystick values are read. 0-1023
-    readAllFromJoystick(rawReads);
-
-    // Report back 0-1023 raw ADC 10-bit values if enabled
-    if (debug == 1)
-    {
-        Serial.print("AX:");
-        Serial.print(rawReads[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(rawReads[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(rawReads[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(rawReads[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(rawReads[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(rawReads[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(rawReads[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.println(rawReads[7]);
-    }
-
-    // Subtract centre position from measured position to determine movement.
-    for (int i = 0; i < 8; i++)
-        centered[i] = rawReads[i] - centerPoints[i]; //
-
-    // Report centered joystick values if enabled. Values should be approx -500 to +500, jitter around 0 at idle.
-    if (debug == 2)
-    {
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.println(centered[7]);
-    }
-
-    // Filter movement values. Set to zero if movement is below deadzone threshold.
-    for (int i = 0; i < 8; i++)
-    {
-        if (centered[i] < DEADZONE && centered[i] > -DEADZONE)
-            centered[i] = 0;
-    }
-
-    // Report centered joystick values. Filtered for deadzone. Approx -500 to +500, locked to zero at idle
-    if (debug == 3)
-    {
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.println(centered[7]);
-    }
-
-    // Doing all through arithmetic contribution by fdmakara
-    // Integer has been changed to 16 bit int16_t to match what the HID protocol expects.
-    int16_t transX, transY, transZ, rotX, rotY, rotZ; // Declare movement variables at 16 bit integers
-    // Original fdmakara calculations
-    // transX = (-centered[AX] +centered[CX])/1;
-    // transY = (-centered[BX] +centered[DX])/1;
-    // transZ = (-centered[AY] -centered[BY] -centered[CY] -centered[DY])/2;
-    // rotX = (-centered[AY] +centered[CY])/2;
-    // rotY = (+centered[BY] -centered[DY])/2;
-    // rotZ = (+centered[AX] +centered[BX] +centered[CX] +centered[DX])/4;
-    // My altered calculations based on debug output. Final divisor can be changed to alter sensitivity for each axis.
-
-    transX = -(-centered[CY] + centered[AY]) / 1;
-    transY = (-centered[BY] + centered[DY]) / 1;
-    if ((abs(centered[AX]) > DEADZONE) && (abs(centered[BX]) > DEADZONE) && (abs(centered[CX]) > DEADZONE) && (abs(centered[DX]) > DEADZONE))
-    {
-        transZ = (-centered[AX] - centered[BX] - centered[CX] - centered[DX]) / 2;
-        transX = 0;
-        transY = 0;
-    }
-    else
-    {
-        transZ = 0;
-    }
-    rotX = (-centered[AX] + centered[CX]) / 1;
-    rotY = (+centered[BX] - centered[DX]) / 1;
-    if ((abs(centered[AY]) > DEADZONE) && (abs(centered[BY]) > DEADZONE) && (abs(centered[CY]) > DEADZONE) && (abs(centered[DY]) > DEADZONE))
-    {
-        rotZ = (+centered[AY] + centered[BY] + centered[CY] + centered[DY]) / 2;
-        rotX = 0;
-        rotY = 0;
-    }
-    else
-    {
-        rotZ = 0;
-    }
-
-    // Alter speed to suit user preference - Use 3DConnexion slider instead for V2.
-    // transX = transX/100*speed;
-    // transY = transY/100*speed;
-    // transZ = transZ/100*speed;
-    // rotX = rotX/100*speed;
-    // rotY = rotY/100*speed;
-    // rotZ = rotZ/100*speed;
-    // Invert directions if needed
-    if (invX == true)
-    {
-        transX = transX * -1;
-    };
-    if (invY == true)
-    {
-        transY = transY * -1;
-    };
-    if (invZ == true)
-    {
-        transZ = transZ * -1;
-    };
-    if (invRX == true)
-    {
-        rotX = rotX * -1;
-    };
-    if (invRY == true)
-    {
-        rotY = rotY * -1;
-    };
-    if (invRZ == true)
-    {
-        rotZ = rotZ * -1;
-    };
-
-
-    // Special case... 
-    // if (abs(rotZ) > 400)
-    // {
-    //     transX = 0;
-    //     transY = 0;
-    //     transZ = 0;
-    //     rotY = 0;
-    //     rotX = 0;
-    // }
-
-    if ( (abs(transX) < DEADZONE) && (abs(transY) < DEADZONE) && (abs(transZ) < DEADZONE) )
-    {
-        rotX = map(rotX, -1024, 1024, -32768, 32767);
-        rotZ = map(rotZ, -1024, 1024, -32768, 32767);
-        rotY = map(rotY, -1024, 1024, -32768, 32767);
-    }
-
-    transX = map(transX, -1024, 1024, -32768, 32767);
-    transZ = map(transZ, -1024, 1024, -32768, 32767);
-    transY = map(transY, -1024, 1024, -32768, 32767);
-
-    float transScale = 0.25f;
-    float rotScale = 0.25f;
-
-    transX = transScale*transX;
-    transY = transScale*transY;
-    transZ = transScale*transZ;
-
-    rotX = rotScale*rotX;
-    rotY = rotScale*rotY;
-    rotZ = rotScale*rotZ;
-
-    // Report translation and rotation values if enabled. Approx -800 to 800 depending on the parameter.
-    if (debug == 4)
-    {
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.println(rotZ);
-    }
-    // Report debug 4 and 5 info side by side for direct reference if enabled. Very useful if you need to alter which inputs are used in the arithmatic above.
-    if (debug == 5)
-    {
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.print(centered[7]);
-        Serial.print("||");
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.println(rotZ);
-    }
-
-
-    // Send data to the 3DConnexion software.
-    // The correct order for me was determined after trial and error
-    send_command(rotX, rotZ, rotY, transX, transZ, transY);
-    //delay(1);
-    send_command(rotX-1, rotZ-1, rotY-1, transX-1, transZ-1, transY-1);
-    //delay(1);
+    if (fabs(*x) < DEADBAND_THRESHOLD)
+        *x = 0;
+    if (fabs(*y) < DEADBAND_THRESHOLD)
+        *y = 0;
 }
 
+// Function to apply a low-pass filter
+void apply_low_pass_filter(float *prev, float current)
+{
+    *prev = ALPHA * current + (1 - ALPHA) * (*prev);
+}
 
+// Function to calculate translation and rotation with filtering
+void calculate_filtered_translation_rotation(const float joystick_inputs[4][2], float translation[3], float rotation[3])
+{
+    static float prev_x[4] = {0}; // Previous X-axis values for filtering
+    static float prev_y[4] = {0}; // Previous Y-axis values for filtering
 
+    float filtered_inputs[4][2];
+    float total_force_x = 0;
+    float total_force_y = 0;
+    float total_force_z = 0;
+    float total_torque[3] = {0};
+
+    // Apply deadband and low-pass filters to joystick inputs
+    for (int i = 0; i < 4; ++i)
+    {
+        // Apply deadband filter
+        float x = joystick_inputs[i][0];
+        float y = joystick_inputs[i][1];
+        apply_deadband(&x, &y);
+
+        // Apply low-pass filter
+        apply_low_pass_filter(&prev_x[i], x);
+        apply_low_pass_filter(&prev_y[i], y);
+
+        // Use filtered values
+        filtered_inputs[i][0] = prev_x[i];
+        filtered_inputs[i][1] = prev_y[i];
+
+        // Calculate forces and torques based on filtered inputs
+        x = filtered_inputs[i][0];
+        y = filtered_inputs[i][1];
+
+        float fx, fy;
+
+        if (i == 0)
+        { // 0 degrees (forward/backward)
+            fx = -y;
+            fy = x;
+            total_torque[0] -= x * 12.5f; // Rotate around X-axis (tilting forward/backward)
+        }
+        else if (i == 1)
+        { // 90 degrees (right/left)
+            fx = -x;
+            fy = -y;
+            total_torque[1] += x * 12.5f; // Rotate around Y-axis (tilting left/right)
+        }
+        else if (i == 2)
+        { // 180 degrees (backward/forward)
+            fx = y;
+            fy = -x;
+            total_torque[0] += x * 12.5f; // Rotate around X-axis (tilting backward/forward)
+        }
+        else
+        { // 270 degrees (left/right)
+            fx = x;
+            fy = y;
+            total_torque[1] -= x * 12.5f; // Rotate around Y-axis (tilting right/left)
+        }
+
+        total_force_x += fx;
+        total_force_y += fy;
+        total_force_z += filtered_inputs[i][0]; // X-axis movement contributes to Z translation
+
+        // For rotation around Z-axis (twisting)
+        total_torque[2] += y * 12.5f; // Y-axis movement contributes to rotation around Z-axis
+    }
+
+    // Set translation and rotation results
+    translation[0] = total_force_x;
+    translation[1] = total_force_y;
+    translation[2] = total_force_z / 4; // Averaging the Z translation
+
+    rotation[0] = total_torque[0];     // Rotation around X-axis
+    rotation[1] = total_torque[1];     // Rotation around Y-axis
+    rotation[2] = total_torque[2] / 4; // Averaging the rotation around Z-axis
+}
 
 void loop()
 {
-    const float deadZone = 0.05;
+    const float f_invX = -1.0f;  // pan left/right
+    const float f_invY = -1.0f;  // pan up/down
+    const float f_invZ = -1.0f;  // zoom in/out
+    const float f_invRX = 1.0f; // Rotate around X axis (tilt front/back)
+    const float f_invRY = -1.0f; // Rotate around Y axis (tilt left/right)
+    const float f_invRZ = -1.0f; // Rotate around Z axis (twist left/right)
 
-    const float f_invX = 1.0f;  // pan left/right
-    const float f_invY = 1.0f;  // pan up/down
-    const float f_invZ = -1.0f;   // zoom in/out
-    const float f_invRX = -1.0f;  // Rotate around X axis (tilt front/back)
-    const float f_invRY = 1.0f; // Rotate around Y axis (tilt left/right)
-    const float f_invRZ = -1.0f;  // Rotate around Z axis (twist left/right)
+    const float boostTX = 1.0f;
+    const float boostTY = 1.0f;
+    const float boostTZ = 1.0f;
 
-    const float boostTX = 1.3f;
-    const float boostTY = 1.3f;
-    const float boostTZ = 1.3f;
-
-    const float boostRX = 1.5f;
-    const float boostRY = 1.5f;
-    const float boostRZ = 1.5f;
-
-    // Output
-    float transX, transY, transZ, rotX, rotY, rotZ;
+    const float boostRX = 0.2f;
+    const float boostRY = 0.2f;
+    const float boostRZ = 0.2f;
 
     // Scale [0...1023]
     int rawReads[8];
 
     // Scale [-1...1]
     float centered[8];
-
 
     // Joystick values are read. 0-1023
     readAllFromJoystick(rawReads);
@@ -511,140 +294,46 @@ void loop()
         }
     }
 
-    if (debug == 2)
-    {
-        // Report centered joystick values if enabled. Values should be approx -500 to +500, jitter around 0 at idle.
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.print("           ");
-        Serial.print("cAX:");
-        Serial.print(centerPoints[0]);
-        Serial.print(",");
-        Serial.print("cAY:");
-        Serial.print(centerPoints[1]);
-        Serial.print(",");
-        Serial.print("cBX:");
-        Serial.print(centerPoints[2]);
-        Serial.print(",");
-        Serial.print("cBY:");
-        Serial.print(centerPoints[3]);
-        Serial.print(",");
-        Serial.print("cCX:");
-        Serial.print(centerPoints[4]);
-        Serial.print(",");
-        Serial.print("cCY:");
-        Serial.print(centerPoints[5]);
-        Serial.print(",");
-        Serial.print("cDX:");
-        Serial.print(centerPoints[6]);
-        Serial.print(",");
-        Serial.print("cDY:");
-        Serial.println(centerPoints[7]);
-    }
+    // Default Assembly when looking from above:
+    //    C           Y+
+    //    |           .
+    // B--+--D   X-...Z+...X+
+    //    |           .
+    //    A           Y-
+    //
+    // A = 180, B=270, D=90, C=0
+    float joystick_inputs[4][2] = {
+        {centered[4], centered[5]},
+        {centered[6], centered[7]},
+        {centered[0], centered[1]},
+        {centered[2], centered[3]}};
 
-    // Apply deadzone
-    for (int i = 0; i < 8; i++)
-    {
-        if (fabs(centered[i]) < deadZone)
-        {
-            centered[i] = 0.0f;
-        }
-    }
+    float translation[3];
+    float rotation[3];
 
-    if (debug == 3)
-    {
-        // Report centered joystick values. Filtered for deadzone. Approx -500 to +500, locked to zero at idle
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.println(centered[7]);
-    }
-
-
-    // Calculate translation and rotation based on the 4 joysticks
-    transX = -(-centered[CY] + centered[AY]) / 2.0f;
-    transY = (-centered[BY] + centered[DY]) / 2.0f;
-    transZ = (-centered[AX] - centered[BX] - centered[CX] - centered[DX]) / 4.0f;
-
-    rotX = (-centered[AX] + centered[CX]) / 2.0;
-    rotY = (+centered[BX] - centered[DX]) / 2.0f;
-    rotZ = (+centered[AY] + centered[BY] + centered[CY] + centered[DY]) / 4.0f;
-
+    calculate_filtered_translation_rotation(joystick_inputs, translation, rotation);
 
     // Boost some values as we are not using the full range of the joysticks (some times)
     // Boost and invert any results
-    transX = constrain(boostTX*f_invX*transX, -1.0f, 1.0f);
-    transY = constrain(boostTY*f_invY*transY, -1.0f, 1.0f);
-    transZ = constrain(boostTZ*f_invZ*transZ, -1.0f, 1.0f);
+    translation[0] = constrain(boostTX * f_invX * translation[0], -1.0f, 1.0f);
+    translation[1] = constrain(boostTY * f_invY * translation[1], -1.0f, 1.0f);
+    translation[2] = constrain(boostTZ * f_invZ * translation[2], -1.0f, 1.0f);
 
-    rotX = constrain(boostRX*f_invRX*rotX, -1.0f, 1.0f);
-    rotY = constrain(boostRY*f_invRY*rotY, -1.0f, 1.0f);
-    rotZ = constrain(boostRZ*f_invRZ*rotZ, -1.0f, 1.0f);
-  
+    rotation[0] = constrain(boostRX * f_invRX * rotation[0], -1.0f, 1.0f);
+    rotation[1] = constrain(boostRY * f_invRY * rotation[1], -1.0f, 1.0f);
+    rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
-    if (debug == 4)
+    // Last step is to convert values to HID values (-32767...32767)
+    int16_t tx = (int16_t)(translation[0] * 32767.0f);
+    int16_t ty = (int16_t)(translation[1] * 32767.0f);
+    int16_t tz = (int16_t)(translation[2] * 32767.0f);
+
+    int16_t rx = (int16_t)(rotation[0] * 32767.0f);
+    int16_t ry = (int16_t)(rotation[1] * 32767.0f);
+    int16_t rz = (int16_t)(rotation[2] * 32767.0f);
+
     {
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.println(rotZ);
-    }
 
-    if (debug == 5)
-    {
-        // Report debug 4 and 5 info side by side for direct reference if enabled. Very useful if you need to alter which inputs are used in the arithmatic above.
         Serial.print("AX:");
         Serial.print(centered[0]);
         Serial.print(",");
@@ -669,158 +358,7 @@ void loop()
         Serial.print("DY:");
         Serial.print(centered[7]);
         Serial.print(" || ");
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.print(rotZ);
 
-/*        Serial.print(" || ");
-        Serial.print("AX:");
-        Serial.print(minPoints[0]);
-        Serial.print(",");
-        Serial.print(maxPoints[0]);
-        Serial.print(" AY:");
-        Serial.print(minPoints[1]);
-        Serial.print(",");
-        Serial.print(maxPoints[1]);
-
-        Serial.print(" BX:");
-        Serial.print(minPoints[2]);
-        Serial.print(",");
-        Serial.print(maxPoints[2]);
-        Serial.print(" BY:");
-        Serial.print(minPoints[3]);
-        Serial.print(",");
-        Serial.print(maxPoints[3]);
-
-        Serial.print(" CX:");
-        Serial.print(minPoints[4]);
-        Serial.print(",");
-        Serial.print(maxPoints[4]);
-        Serial.print(" CY:");
-        Serial.print(minPoints[5]);
-        Serial.print(",");
-        Serial.print(maxPoints[5]);
-
-        Serial.print(" DX:");
-        Serial.print(minPoints[6]);
-        Serial.print(",");
-        Serial.print(maxPoints[6]);
-        Serial.print(" DY:");
-        Serial.print(minPoints[7]);
-        Serial.print(",");
-        Serial.print(maxPoints[7]);
-*/
-        Serial.println("");
-
-    }
-
-
-    // Single command mode?
-    const float minMove = 0.16f;
-    if (fabs(rotZ) > minMove)
-    {
-        rotY = 0.0f;
-        rotX = 0.0f;
-
-        transX = 0.0f;
-        transY = 0.0f;
-        transZ = 0.0f;
-    }
-    else
-    {
-        rotZ = 0.0f;
-    }
-
-
-    if (fabs(transZ) > minMove)
-    {
-        rotY = 0.0f;
-        rotX = 0.0f;
-        rotZ = 0.0f;
-
-        transX = 0.0f;
-        transY = 0.0f;
-    }
-    else
-    {
-        transZ = 0.0f;
-    }
-
-/*    else if (fabs(transZ) > minMove)
-    {
-        rotX = 0.0f;
-        rotY = 0.0f;
-        rotZ = 0.0f;
-
-        transX = 0.0f;
-        transY = 0.0f;
-    }
-    else if (fabs(transX) > minMove)
-    {
-        rotX = 0.0f;
-        rotY = 0.0f;
-        rotZ = 0.0f;
-
-        transY = 0.0f;
-        transZ = 0.0f;
-    }
-    else if (fabs(transY) > minMove)
-    {
-        rotX = 0.0f;
-        rotY = 0.0f;
-        rotZ = 0.0f;
-
-        transX = 0.0f;
-        transZ = 0.0f;
-    }
-    else if (fabs(rotY) > minMove)
-    {
-        rotZ = 0.0f;
-        rotX = 0.0f;
-
-        transX = 0.0f;
-        transY = 0.0f;
-        transZ = 0.0f;
-    }
-    else if (fabs(rotX) > minMove)
-    {
-        rotZ = 0.0f;
-        rotY = 0.0f;
-
-        transX = 0.0f;
-        transY = 0.0f;
-        transZ = 0.0f;
-    }
-*/
-
-
-
-
-    // Last step is to convert values to HID values (-32767...32767)
-    int16_t tx = (int16_t)(transX * 32767.0f);
-    int16_t ty = (int16_t)(transY * 32767.0f);
-    int16_t tz = (int16_t)(transZ * 32767.0f);
-
-    int16_t rx = (int16_t)(rotX * 32767.0f);
-    int16_t ry = (int16_t)(rotY * 32767.0f);
-    int16_t rz = (int16_t)(rotZ * 32767.0f);
-
-    if (debug == 6)
-    {
         Serial.print("TX:");
         Serial.print(tx);
         Serial.print(",");
@@ -846,189 +384,5 @@ void loop()
 
     // Under Linux, using "spacenavd", it seems like the reports must "differ" for a report to be used,
     // So, always send the rerport, but very close the old value so that an event is tiggered
-    send_command(rx-1, rz-1, ry-1, tx-1, tz-1, ty-1);
-
-
-#if 0
-
-
-    // Doing all through arithmetic contribution by fdmakara
-    // Integer has been changed to 16 bit int16_t to match what the HID protocol expects.
-    int16_t transX, transY, transZ, rotX, rotY, rotZ; // Declare movement variables at 16 bit integers
-    // Original fdmakara calculations
-    // transX = (-centered[AX] +centered[CX])/1;
-    // transY = (-centered[BX] +centered[DX])/1;
-    // transZ = (-centered[AY] -centered[BY] -centered[CY] -centered[DY])/2;
-    // rotX = (-centered[AY] +centered[CY])/2;
-    // rotY = (+centered[BY] -centered[DY])/2;
-    // rotZ = (+centered[AX] +centered[BX] +centered[CX] +centered[DX])/4;
-    // My altered calculations based on debug output. Final divisor can be changed to alter sensitivity for each axis.
-
-    transX = -(-centered[CY] + centered[AY]) / 1;
-    transY = (-centered[BY] + centered[DY]) / 1;
-    if ((abs(centered[AX]) > DEADZONE) && (abs(centered[BX]) > DEADZONE) && (abs(centered[CX]) > DEADZONE) && (abs(centered[DX]) > DEADZONE))
-    {
-        transZ = (-centered[AX] - centered[BX] - centered[CX] - centered[DX]) / 2;
-        transX = 0;
-        transY = 0;
-    }
-    else
-    {
-        transZ = 0;
-    }
-    rotX = (-centered[AX] + centered[CX]) / 1;
-    rotY = (+centered[BX] - centered[DX]) / 1;
-    if ((abs(centered[AY]) > DEADZONE) && (abs(centered[BY]) > DEADZONE) && (abs(centered[CY]) > DEADZONE) && (abs(centered[DY]) > DEADZONE))
-    {
-        rotZ = (+centered[AY] + centered[BY] + centered[CY] + centered[DY]) / 2;
-        rotX = 0;
-        rotY = 0;
-    }
-    else
-    {
-        rotZ = 0;
-    }
-
-    // Alter speed to suit user preference - Use 3DConnexion slider instead for V2.
-    // transX = transX/100*speed;
-    // transY = transY/100*speed;
-    // transZ = transZ/100*speed;
-    // rotX = rotX/100*speed;
-    // rotY = rotY/100*speed;
-    // rotZ = rotZ/100*speed;
-    // Invert directions if needed
-    if (invX == true)
-    {
-        transX = transX * -1;
-    };
-    if (invY == true)
-    {
-        transY = transY * -1;
-    };
-    if (invZ == true)
-    {
-        transZ = transZ * -1;
-    };
-    if (invRX == true)
-    {
-        rotX = rotX * -1;
-    };
-    if (invRY == true)
-    {
-        rotY = rotY * -1;
-    };
-    if (invRZ == true)
-    {
-        rotZ = rotZ * -1;
-    };
-
-
-    // Special case... 
-    // if (abs(rotZ) > 400)
-    // {
-    //     transX = 0;
-    //     transY = 0;
-    //     transZ = 0;
-    //     rotY = 0;
-    //     rotX = 0;
-    // }
-
-    if ( (abs(transX) < DEADZONE) && (abs(transY) < DEADZONE) && (abs(transZ) < DEADZONE) )
-    {
-        rotX = map(rotX, -1024, 1024, -32768, 32767);
-        rotZ = map(rotZ, -1024, 1024, -32768, 32767);
-        rotY = map(rotY, -1024, 1024, -32768, 32767);
-    }
-
-    transX = map(transX, -1024, 1024, -32768, 32767);
-    transZ = map(transZ, -1024, 1024, -32768, 32767);
-    transY = map(transY, -1024, 1024, -32768, 32767);
-
-    float transScale = 0.25f;
-    float rotScale = 0.25f;
-
-    transX = transScale*transX;
-    transY = transScale*transY;
-    transZ = transScale*transZ;
-
-    rotX = rotScale*rotX;
-    rotY = rotScale*rotY;
-    rotZ = rotScale*rotZ;
-
-    // Report translation and rotation values if enabled. Approx -800 to 800 depending on the parameter.
-    if (debug == 4)
-    {
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.println(rotZ);
-    }
-    // Report debug 4 and 5 info side by side for direct reference if enabled. Very useful if you need to alter which inputs are used in the arithmatic above.
-    if (debug == 5)
-    {
-        Serial.print("AX:");
-        Serial.print(centered[0]);
-        Serial.print(",");
-        Serial.print("AY:");
-        Serial.print(centered[1]);
-        Serial.print(",");
-        Serial.print("BX:");
-        Serial.print(centered[2]);
-        Serial.print(",");
-        Serial.print("BY:");
-        Serial.print(centered[3]);
-        Serial.print(",");
-        Serial.print("CX:");
-        Serial.print(centered[4]);
-        Serial.print(",");
-        Serial.print("CY:");
-        Serial.print(centered[5]);
-        Serial.print(",");
-        Serial.print("DX:");
-        Serial.print(centered[6]);
-        Serial.print(",");
-        Serial.print("DY:");
-        Serial.print(centered[7]);
-        Serial.print("||");
-        Serial.print("TX:");
-        Serial.print(transX);
-        Serial.print(",");
-        Serial.print("TY:");
-        Serial.print(transY);
-        Serial.print(",");
-        Serial.print("TZ:");
-        Serial.print(transZ);
-        Serial.print(",");
-        Serial.print("RX:");
-        Serial.print(rotX);
-        Serial.print(",");
-        Serial.print("RY:");
-        Serial.print(rotY);
-        Serial.print(",");
-        Serial.print("RZ:");
-        Serial.println(rotZ);
-    }
-
-
-    // Send data to the 3DConnexion software.
-    // The correct order for me was determined after trial and error
-    send_command(rotX, rotZ, rotY, transX, transZ, transY);
-    //delay(1);
-    send_command(rotX-1, rotZ-1, rotY-1, transX-1, transZ-1, transY-1);
-    //delay(1);
-
-#endif
+    send_command(rx - 1, rz - 1, ry - 1, tx - 1, tz - 1, ty - 1);
 }
