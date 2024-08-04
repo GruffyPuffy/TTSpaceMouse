@@ -79,11 +79,53 @@ static const uint8_t _hidReportDescriptor[] PROGMEM = {
 #define DX 6
 #define DY 7
 
+
+// Movement thresholds
+const float trans_threshold[3] = {0.1f, 0.1f, 0.02f};
+const float rot_threshold[3] = {0.03f, 0.03f, 0.03f};
+
+// Axes inverting etc
+const float f_invX = -1.0f;  // pan left/right
+const float f_invY = -1.0f;  // pan up/down
+const float f_invZ = -1.0f;  // zoom in/out
+const float f_invRX = 1.0f;  // Rotate around X axis (tilt front/back)
+const float f_invRY = -1.0f; // Rotate around Y axis (tilt left/right)
+const float f_invRZ = -1.0f; // Rotate around Z axis (twist left/right)
+
+// Change this value to decrease/increase speed of movment.
+const float allBoost = 0.2f;
+
+// Apply different speed factors for all directions/translations
+const float boostTX = 0.8f*allBoost;
+const float boostTY = 0.8f*allBoost;
+const float boostTZ = 1.0f*allBoost;
+
+const float boostRX = 0.4f*allBoost;
+const float boostRY = 0.4f*allBoost;
+const float boostRZ = 0.4f*allBoost;
+
+// Deadband threshold
+//#define DEADBAND_THRESHOLD 0.05f
+// Disabled for now
+#define DEADBAND_THRESHOLD 0.0f
+
+// Low-pass filter constants
+#define ALPHA 0.1f // Smoothing factor (0 < ALPHA < 1)
+
+// Movement state for tracking previous movements and rotations
+typedef struct
+{
+    float last_translation[3];
+    float last_rotation[3];
+    bool translation_significant[3]; // Flags for translation (X, Y, Z)
+    bool rotation_significant[3];    // Flags for rotation (X, Y, Z)
+    bool is_moving;
+} MovementState;
+
+
+
 // Centerpoint variable to be populated during setup routine.
 int centerPoints[8];
-
-int maxPoints[8] = {512, 512, 512, 512, 512, 512, 512, 512};
-int minPoints[8] = {512, 512, 512, 512, 512, 512, 512, 512};
 
 // Function to read and store analogue voltages for each joystick axis.
 void readAllFromJoystick(int *rawReads)
@@ -91,17 +133,6 @@ void readAllFromJoystick(int *rawReads)
     for (int i = 0; i < 8; i++)
     {
         rawReads[i] = analogRead(PINLIST[i]);
-
-        // Auto max/min check
-        if (rawReads[i] > maxPoints[i])
-        {
-            maxPoints[i] = rawReads[i];
-        }
-
-        if (rawReads[i] < minPoints[i])
-        {
-            minPoints[i] = rawReads[i];
-        }
     }
 }
 
@@ -110,11 +141,10 @@ void setup()
     // HID protocol is set.
     static HIDSubDescriptor node(_hidReportDescriptor, sizeof(_hidReportDescriptor));
     HID().AppendDescriptor(&node);
-    // Begin Seral for debugging
-    Serial.begin(250000);
-    delay(100);
 
-    // Read idle/centre positions for joysticks.
+    Serial.begin(115200);
+
+    // Calibration of center position (3*100 => 300ms)
     readAllFromJoystick(centerPoints);
     for (int p = 0; p < 100; p++)
     {
@@ -131,8 +161,8 @@ void setup()
     }
 }
 
-// Function to send translation and rotation data to the 3DConnexion software using the HID protocol outlined earlier. Two sets of data are sent: translation and then rotation.
-// For each, a 16bit integer is split into two using bit shifting. The first is mangitude and the second is direction.
+// Send data on the USB endpoint
+// Pack int16_t into uint8_t bytes.
 void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int16_t z)
 {
     uint8_t trans[6];
@@ -154,34 +184,19 @@ void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int1
     HID().SendReport(2, rot, 6);
 }
 
-// Movement thresholds
-const float trans_threshold[3] = {0.1f, 0.1f, 0.03f};
-const float rot_threshold[3] = {0.03f, 0.03f, 0.03f};
-
-// Deadband threshold
-//#define DEADBAND_THRESHOLD 0.05f
-#define DEADBAND_THRESHOLD 0.0f
-
-// Low-pass filter constants
-#define ALPHA 0.1f // Smoothing factor (0 < ALPHA < 1)
-
-// Movement state for tracking previous movements and rotations
-typedef struct
-{
-    float last_translation[3];
-    float last_rotation[3];
-    bool translation_significant[3]; // Flags for translation (X, Y, Z)
-    bool rotation_significant[3];    // Flags for rotation (X, Y, Z)
-    bool is_moving;
-} MovementState;
 
 // Function to apply a deadband filter
 void apply_deadband(float *x, float *y)
 {
     if (fabs(*x) < DEADBAND_THRESHOLD)
+    {
         *x = 0;
+    }
+
     if (fabs(*y) < DEADBAND_THRESHOLD)
+    {
         *y = 0;
+    }
 }
 
 // Function to apply a low-pass filter
@@ -224,28 +239,33 @@ void calculate_translation_rotation(const float joystick_inputs[4][2], float tra
 
         float fx, fy;
 
+        // Distance from rotation point. In reality this is just boosting rotations, set to 1.0f for now.
         const float distance = 1.0f;
 
         if (i == 0)
-        { // 0 degrees (forward/backward)
+        { 
+            // 0 degrees (forward/backward)
             fx = -y;
             fy = x;
             total_torque[0] -= x * distance; // Rotate around X-axis (tilting forward/backward)
         }
         else if (i == 1)
-        { // 90 degrees (right/left)
+        { 
+            // 90 degrees (right/left)
             fx = -x;
             fy = -y;
             total_torque[1] += x * distance; // Rotate around Y-axis (tilting left/right)
         }
         else if (i == 2)
-        { // 180 degrees (backward/forward)
+        { 
+            // 180 degrees (backward/forward)
             fx = y;
             fy = -x;
             total_torque[0] += x * distance; // Rotate around X-axis (tilting backward/forward)
         }
         else
-        { // 270 degrees (left/right)
+        { 
+            // 270 degrees (left/right)
             fx = x;
             fy = y;
             total_torque[1] -= x * distance; // Rotate around Y-axis (tilting right/left)
@@ -270,23 +290,33 @@ void calculate_translation_rotation(const float joystick_inputs[4][2], float tra
 }
 
 // Function to detect significant movement
-bool is_significant_move(float current, float last, float threshold) 
+bool is_significant_move(bool last_significant_state, float current, float last, float threshold) 
 {
-    return fabs(current - last) > threshold;
+    // Very small moves 
+    if ((last_significant_state) && (fabs(current - last) == 0.0f))
+    {
+        // Keep locked in same move, if not any change on joy values
+        return last_significant_state;
+    }
+    else
+    {
+        return fabs(current - last) > threshold;
+    }
 }
 
 // Function to detect and consolidate movements
 void detect_and_consolidate_move(const float translation[3], const float rotation[3], MovementState *state)
 {
+
     bool translation_significant[3] = {
-        is_significant_move(translation[0], state->last_translation[0], trans_threshold[0]),
-        is_significant_move(translation[1], state->last_translation[1], trans_threshold[1]),
-        is_significant_move(translation[2], state->last_translation[2], trans_threshold[2])};
+        is_significant_move(state->translation_significant[0], translation[0], state->last_translation[0], trans_threshold[0]),
+        is_significant_move(state->translation_significant[1], translation[1], state->last_translation[1], trans_threshold[1]),
+        is_significant_move(state->translation_significant[2], translation[2], state->last_translation[2], trans_threshold[2])};
 
     bool rotation_significant[3] = {
-        is_significant_move(rotation[0], state->last_rotation[0], rot_threshold[0]),
-        is_significant_move(rotation[1], state->last_rotation[1], rot_threshold[1]),
-        is_significant_move(rotation[2], state->last_rotation[2], rot_threshold[2])};
+        is_significant_move(state->rotation_significant[0], rotation[0], state->last_rotation[0], rot_threshold[0]),
+        is_significant_move(state->rotation_significant[1], rotation[1], state->last_rotation[1], rot_threshold[1]),
+        is_significant_move(state->rotation_significant[2], rotation[2], state->last_rotation[2], rot_threshold[2])};
 
     // Update significant flags
     state->translation_significant[0] = translation_significant[0];
@@ -318,26 +348,12 @@ void detect_and_consolidate_move(const float translation[3], const float rotatio
 
 void loop()
 {
-    const float f_invX = -1.0f;  // pan left/right
-    const float f_invY = -1.0f;  // pan up/down
-    const float f_invZ = -1.0f;  // zoom in/out
-    const float f_invRX = 1.0f;  // Rotate around X axis (tilt front/back)
-    const float f_invRY = -1.0f; // Rotate around Y axis (tilt left/right)
-    const float f_invRZ = -1.0f; // Rotate around Z axis (twist left/right)
-
-    const float boostTX = 1.0f;
-    const float boostTY = 1.0f;
-    const float boostTZ = 1.0f;
-
-    const float boostRX = 0.2f;
-    const float boostRY = 0.2f;
-    const float boostRZ = 0.2f;
-
+    // Static to keep between loop() calls
     static MovementState state;
-
     static float last_translation[3];
     static float last_rotation[3];
 
+    // Internals
     // Scale [0...1023]
     int rawReads[8];
 
@@ -380,6 +396,7 @@ void loop()
     float translation[3];
     float rotation[3];
 
+    // Convert from Joystick to translation/rotation
     calculate_translation_rotation(joystick_inputs, translation, rotation);
 
     // Detect and consolidate significant movements
@@ -478,7 +495,7 @@ void loop()
         }
         else
         {
-            Serial.print(" ---> MIX");
+            Serial.print(" ---> MIX (should not come here...)");
         }
         Serial.println("");
 
@@ -530,73 +547,6 @@ void loop()
     int16_t rx = (int16_t)(rotation[0] * 32767.0f);
     int16_t ry = (int16_t)(rotation[1] * 32767.0f);
     int16_t rz = (int16_t)(rotation[2] * 32767.0f);
-
-    {
-
-        /*        Serial.print("AX:");
-                Serial.print(centered[0]);
-                Serial.print(",");
-                Serial.print("AY:");
-                Serial.print(centered[1]);
-                Serial.print(",");
-                Serial.print("BX:");
-                Serial.print(centered[2]);
-                Serial.print(",");
-                Serial.print("BY:");
-                Serial.print(centered[3]);
-                Serial.print(",");
-                Serial.print("CX:");
-                Serial.print(centered[4]);
-                Serial.print(",");
-                Serial.print("CY:");
-                Serial.print(centered[5]);
-                Serial.print(",");
-                Serial.print("DX:");
-                Serial.print(centered[6]);
-                Serial.print(",");
-                Serial.print("DY:");
-                Serial.print(centered[7]);
-                Serial.print(" || ");
-        */
-        // Serial.print("TX:");
-        // Serial.print(translation[0]);
-        // Serial.print(",");
-        // Serial.print("TY:");
-        // Serial.print(translation[1]);
-        // Serial.print(",");
-        // Serial.print("TZ:");
-        // Serial.print(translation[2]);
-        // Serial.print(",");
-        // Serial.print("RX:");
-        // Serial.print(rotation[0]);
-        // Serial.print(",");
-        // Serial.print("RY:");
-        // Serial.print(rotation[1]);
-        // Serial.print(",");
-        // Serial.print("RZ:");
-        // Serial.print(rotation[2]);
-
-        // Serial.print(" || ");
-
-        // Serial.print("TX:");
-        // Serial.print(tx);
-        // Serial.print(",");
-        // Serial.print("TY:");
-        // Serial.print(ty);
-        // Serial.print(",");
-        // Serial.print("TZ:");
-        // Serial.print(tz);
-        // Serial.print(",");
-        // Serial.print("RX:");
-        // Serial.print(rx);
-        // Serial.print(",");
-        // Serial.print("RY:");
-        // Serial.print(ry);
-        // Serial.print(",");
-        // Serial.print("RZ:");
-        // Serial.print(rz);
-        // Serial.println("");
-    }
 
     // Send data to the 3DConnexion software.
     send_command(rx, rz, ry, tx, tz, ty);
