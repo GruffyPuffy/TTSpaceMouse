@@ -12,7 +12,7 @@ board_config = env.BoardConfig()
 #board_config.update("build.hwids", [["0x046D", "0xC62B"]])
 #board_config.update("build.hwids", [["0x046D", "0xC62B"], ['0x1B4F', '0x9205'], ['0x2341', '0x8037'], ['0x2341', '0x0037']])
 
-board_config.update("build.hwids", [["0x256f", "0xc631"], ['0x1B4F', '0x9205'], ['0x2341', '0x8037'], ['0x2341', '0x0037']])
+board_config.update("build.hwids", [["0x256f", "0xc635"], ['0x1B4F', '0x9205'], ['0x2341', '0x8037'], ['0x2341', '0x0037']])
 board_config.update("build.usb_product", "3Dconnexion")
 board_config.update("build.usb_manufacturer", "Gruffware")
 board_config.update("build.vendor", "Gruffware")

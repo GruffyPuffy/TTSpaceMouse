@@ -1,7 +1,7 @@
 // This code is bases of Teaching Tech's project (which is also based on varios people, see below)
 // https://www.printables.com/model/864950-open-source-spacemouse-space-mushroom-remix
 
-#include "HID.h"
+#include "Joystick.h"
 
 // Default Assembly when looking from above:
 //    C           Y+
@@ -80,6 +80,12 @@ static const uint8_t _hidReportDescriptor[] PROGMEM = {
 #define DY 7
 
 
+Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, 
+  JOYSTICK_TYPE_MULTI_AXIS, 4, 0,
+  true, true, true, true, true, true,
+  false, false, false, false, false);
+
+
 // Movement thresholds
 const float trans_threshold[3] = {0.1f, 0.1f, 0.02f};
 const float rot_threshold[3] = {0.03f, 0.03f, 0.03f};
@@ -138,9 +144,7 @@ void readAllFromJoystick(int *rawReads)
 
 void setup()
 {
-    // HID protocol is set.
-    static HIDSubDescriptor node(_hidReportDescriptor, sizeof(_hidReportDescriptor));
-    HID().AppendDescriptor(&node);
+    Joystick.begin(false);
 
     Serial.begin(115200);
 
@@ -159,29 +163,6 @@ void setup()
             centerPoints[i] = (centerPoints[i] + newCenterPoints[i]) / 2;
         }
     }
-}
-
-// Send data on the USB endpoint
-// Pack int16_t into uint8_t bytes.
-void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int16_t z)
-{
-    uint8_t trans[6];
-    trans[0] = (uint8_t)(x & 0xFF);
-    trans[1] = (uint8_t)(x >> 8);
-    trans[2] = (uint8_t)(y & 0xFF);
-    trans[3] = (uint8_t)(y >> 8);
-    trans[4] = (uint8_t)(z & 0xFF);
-    trans[5] = (uint8_t)(z >> 8);
-    HID().SendReport(1, trans, 6);
-
-    uint8_t rot[6];
-    rot[0] = (uint8_t)(rx & 0xFF);
-    rot[1] = (uint8_t)(rx >> 8);
-    rot[2] = (uint8_t)(ry & 0xFF);
-    rot[3] = (uint8_t)(ry >> 8);
-    rot[4] = (uint8_t)(rz & 0xFF);
-    rot[5] = (uint8_t)(rz >> 8);
-    HID().SendReport(2, rot, 6);
 }
 
 
@@ -399,124 +380,132 @@ void loop()
     // Convert from Joystick to translation/rotation
     calculate_translation_rotation(joystick_inputs, translation, rotation);
 
-    // Detect and consolidate significant movements
-    detect_and_consolidate_move(translation, rotation, &state);
+    int mode = 1;
+    float damp = 0.1f;
 
-    // Use the filtered translation and rotation from the state
-    if (state.is_moving)
+    if (mode == 1)
     {
-        Serial.print("Moving: ");
-        // Check which types of movements were significant
-        if (state.translation_significant[0])
+        // Detect and consolidate significant movements
+        detect_and_consolidate_move(translation, rotation, &state);
+
+        // Use the filtered translation and rotation from the state
+        if (state.is_moving)
         {
-            Serial.print(" TX:");
-            //Serial.print(state.last_translation[0]);
-            Serial.print(translation[0]);
-        }
-        if (state.translation_significant[1])
-        {
-            Serial.print(" TY:");
-            //Serial.print(state.last_translation[1]);
-            Serial.print(translation[1]);
-        }
-        if (state.translation_significant[2])
-        {
-            Serial.print(" TZ:");
-            //Serial.print(state.last_translation[2]);
-            Serial.print(translation[2]);
-        }
+            Serial.print("Moving: ");
+            // Check which types of movements were significant
+            if (state.translation_significant[0])
+            {
+                Serial.print(" TX:");
+                //Serial.print(state.last_translation[0]);
+                Serial.print(translation[0]);
+            }
+            if (state.translation_significant[1])
+            {
+                Serial.print(" TY:");
+                //Serial.print(state.last_translation[1]);
+                Serial.print(translation[1]);
+            }
+            if (state.translation_significant[2])
+            {
+                Serial.print(" TZ:");
+                //Serial.print(state.last_translation[2]);
+                Serial.print(translation[2]);
+            }
 
 
-        if (state.rotation_significant[0])
-        {
-            Serial.print(" RX:");
-            //Serial.print(state.last_rotation[0]);
-            Serial.print(rotation[0]);
-        }
-        if (state.rotation_significant[1])
-        {
-            Serial.print(" RY:");
-            //Serial.print(state.last_rotation[1]);
-            Serial.print(rotation[1]);
-        }
-        if (state.rotation_significant[2])
-        {
-            Serial.print(" RZ:");
-            //Serial.print(state.last_rotation[2]);
-            Serial.print(rotation[2]);
-        }
+            if (state.rotation_significant[0])
+            {
+                Serial.print(" RX:");
+                //Serial.print(state.last_rotation[0]);
+                Serial.print(rotation[0]);
+            }
+            if (state.rotation_significant[1])
+            {
+                Serial.print(" RY:");
+                //Serial.print(state.last_rotation[1]);
+                Serial.print(rotation[1]);
+            }
+            if (state.rotation_significant[2])
+            {
+                Serial.print(" RZ:");
+                //Serial.print(state.last_rotation[2]);
+                Serial.print(rotation[2]);
+            }
 
-        translation[0] = state.last_translation[0];
-        translation[1] = state.last_translation[1];
-        translation[2] = state.last_translation[2];
+            translation[0] = state.last_translation[0];
+            translation[1] = state.last_translation[1];
+            translation[2] = state.last_translation[2];
 
-        rotation[0] = state.last_rotation[0];
-        rotation[1] = state.last_rotation[1];
-        rotation[2] = state.last_rotation[2];
+            rotation[0] = state.last_rotation[0];
+            rotation[1] = state.last_rotation[1];
+            rotation[2] = state.last_rotation[2];
 
-        // Apply priority 
-        if (state.translation_significant[2])
-        {
-            translation[0] = 0.0f;
-            translation[1] = 0.0f;
+            // Apply priority 
+            if (state.translation_significant[2])
+            {
+                translation[0] = damp * translation[0];
+                translation[1] = damp * translation[1];
 
-            rotation[0] = 0.0f;
-            rotation[1] = 0.0f;
-            rotation[2] = 0.0f;
-            Serial.print(" ---> PUSH/PULL");
-        }
-        else if (state.rotation_significant[2])
-        {
-            translation[0] = 0.0f;
-            translation[1] = 0.0f;
-            translation[2] = 0.0f;
+                rotation[0] = damp * rotation[0];
+                rotation[1] = damp * rotation[1];
+                rotation[2] = damp * rotation[2];
+                Serial.print(" ---> PUSH/PULL");
+            }
+            else if (state.rotation_significant[2])
+            {
+                translation[0] = damp * translation[0];
+                translation[1] = damp * translation[1];
+                translation[2] = damp * translation[2];
 
-            rotation[0] = 0.0f;
-            rotation[1] = 0.0f;
-            Serial.print(" ---> TWIST");
-        }
-        else if ((state.rotation_significant[0]) || (state.rotation_significant[1]))
-        {
-            translation[0] = 0.0f;
-            translation[1] = 0.0f;
-            translation[2] = 0.0f;
+                rotation[0] = damp * rotation[0];
+                rotation[1] = damp * rotation[1];
+                Serial.print(" ---> TWIST");
+            }
+            else if ((state.rotation_significant[0]) || (state.rotation_significant[1]))
+            {
+                translation[0] = damp * translation[0];
+                translation[1] = damp * translation[1];
+                translation[2] = damp * translation[2];
 
-            rotation[2] = 0.0f;
-            Serial.print(" ---> ROTATION");
-        }
-        else if ((state.translation_significant[0]) || (state.translation_significant[1]))
-        {
-            translation[2] = 0.0f;
+                rotation[2] = damp * rotation[2];
+                Serial.print(" ---> ROTATION");
+            }
+            else if ((state.translation_significant[0]) || (state.translation_significant[1]))
+            {
+                translation[2] = damp * translation[2];
 
-            rotation[0] = 0.0f;
-            rotation[1] = 0.0f;
-            rotation[2] = 0.0f;
-            Serial.print(" ---> TRANSLATION");
+                rotation[0] = damp * rotation[0];
+                rotation[1] = damp * rotation[1];
+                rotation[2] = damp * rotation[2];
+
+                Serial.print(" ---> TRANSLATION");
+            }
+            else
+            {
+                Serial.print(" ---> MIX (should not come here...)");
+            }
+            Serial.println("");
+            Serial.print("MOVE");
         }
         else
         {
-            Serial.print(" ---> MIX (should not come here...)");
-        }
-        Serial.println("");
-
-    }
-    else
-    {
-        // Continue move 
-        for (int i = 0; i < 3; i++)
-        {
-            translation[i] = last_translation[i];
-            rotation[i] = last_rotation[i];
-
-            // Stop movement if low moves...
-            if (fabs(translation[i]) < 0.1f)
+            // Continue move 
+            for (int i = 0; i < 3; i++)
             {
-                translation[i] = 0.0f;
+                translation[i] = last_translation[i];
+                rotation[i] = last_rotation[i];
+
+                // Stop movement if low moves...
+                if (fabs(translation[i]) < 0.1f)
+                {
+                    translation[i] = 0.0f;
+                }
+                if (fabs(rotation[i]) < 0.1f)
+                {
+                    rotation[i] = 0.0f;
+                }
             }
-            if (fabs(rotation[i]) < 0.1f)
-            {
-                rotation[i] = 0.0f;
-            }
+            Serial.print("CONT");
         }
     }
 
@@ -539,19 +528,59 @@ void loop()
     rotation[1] = constrain(boostRY * f_invRY * rotation[1], -1.0f, 1.0f);
     rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
-    // Last step is to convert values to HID values (-32767...32767)
-    int16_t tx = (int16_t)(translation[0] * 32767.0f);
-    int16_t ty = (int16_t)(translation[1] * 32767.0f);
-    int16_t tz = (int16_t)(translation[2] * 32767.0f);
+    // Last step is to convert values 
+    int16_t tx = 511 + (int16_t)(translation[0] * 512.0f);
+    int16_t ty = 511 + (int16_t)(translation[1] * 512.0f);
+    int16_t tz = 511 + (int16_t)(translation[2] * 512.0f);
 
-    int16_t rx = (int16_t)(rotation[0] * 32767.0f);
-    int16_t ry = (int16_t)(rotation[1] * 32767.0f);
-    int16_t rz = (int16_t)(rotation[2] * 32767.0f);
+    int16_t rx = 511 + (int16_t)(rotation[0] * 512.0f);
+    int16_t ry = 511 + (int16_t)(rotation[1] * 512.0f);
+    int16_t rz = 511 + (int16_t)(rotation[2] * 512.0f);
+
+    // Serial.print("X: ");
+    // Serial.println(tx);
+
 
     // Send data to the 3DConnexion software.
-    send_command(rx, rz, ry, tx, tz, ty);
+    // SWAP order to match 
 
-    // Under Linux, using "spacenavd", it seems like the reports must "differ" for a report to be used,
-    // So, always send the rerport, but very close the old value so that an event is tiggered
-    send_command(rx - 1, rz - 1, ry - 1, tx - 1, tz - 1, ty - 1);
+
+    Joystick.setXAxis(tx);
+    Joystick.setYAxis(tz);
+    Joystick.setZAxis(ty);
+
+    Joystick.setRxAxis(rx);
+    Joystick.setRyAxis(rz);
+    Joystick.setRzAxis(ry);
+
+    Joystick.sendState();
+
+    delay(10);
+
+    Joystick.setXAxis(tx+1);
+    Joystick.setYAxis(tz+1);
+    Joystick.setZAxis(ty+1);
+
+    Joystick.setRxAxis(rx+1);
+    Joystick.setRyAxis(rz+1);
+    Joystick.setRzAxis(ry+1);
+
+    Joystick.sendState();
+
+
+    Serial.print(" TX: ");
+    Serial.print(tx);
+    Serial.print(" TY: ");
+    Serial.print(ty);
+    Serial.print(" TZ: ");
+    Serial.print(tz);
+    Serial.print(" RX: ");
+    Serial.print(rx);
+    Serial.print(" RY: ");
+    Serial.print(ry);
+    Serial.print(" RZ: ");
+    Serial.print(rz);
+    Serial.print("                                                          \r");
+
+
 }
