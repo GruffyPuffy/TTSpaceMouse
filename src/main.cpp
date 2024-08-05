@@ -1,7 +1,7 @@
 // This code is bases of Teaching Tech's project (which is also based on varios people, see below)
 // https://www.printables.com/model/864950-open-source-spacemouse-space-mushroom-remix
 
-#include "Joystick.h"
+#include "HID.h"
 
 // Default Assembly when looking from above:
 //    C           Y+
@@ -79,13 +79,6 @@ static const uint8_t _hidReportDescriptor[] PROGMEM = {
 #define DX 6
 #define DY 7
 
-
-Joystick_ Joystick(JOYSTICK_DEFAULT_REPORT_ID, 
-  JOYSTICK_TYPE_MULTI_AXIS, 4, 0,
-  true, true, true, true, true, true,
-  false, false, false, false, false);
-
-
 // Movement thresholds
 const float trans_threshold[3] = {0.1f, 0.1f, 0.02f};
 const float rot_threshold[3] = {0.03f, 0.03f, 0.03f};
@@ -144,7 +137,9 @@ void readAllFromJoystick(int *rawReads)
 
 void setup()
 {
-    Joystick.begin(false);
+    // HID protocol is set.
+    static HIDSubDescriptor node(_hidReportDescriptor, sizeof(_hidReportDescriptor));
+    HID().AppendDescriptor(&node);
 
     Serial.begin(115200);
 
@@ -165,6 +160,28 @@ void setup()
     }
 }
 
+// Send data on the USB endpoint
+// Pack int16_t into uint8_t bytes.
+void send_command(int16_t rx, int16_t ry, int16_t rz, int16_t x, int16_t y, int16_t z)
+{
+    uint8_t trans[6];
+    trans[0] = (uint8_t)(x & 0xFF);
+    trans[1] = (uint8_t)(x >> 8);
+    trans[2] = (uint8_t)(y & 0xFF);
+    trans[3] = (uint8_t)(y >> 8);
+    trans[4] = (uint8_t)(z & 0xFF);
+    trans[5] = (uint8_t)(z >> 8);
+    HID().SendReport(1, trans, 6);
+
+    uint8_t rot[6];
+    rot[0] = (uint8_t)(rx & 0xFF);
+    rot[1] = (uint8_t)(rx >> 8);
+    rot[2] = (uint8_t)(ry & 0xFF);
+    rot[3] = (uint8_t)(ry >> 8);
+    rot[4] = (uint8_t)(rz & 0xFF);
+    rot[5] = (uint8_t)(rz >> 8);
+    HID().SendReport(2, rot, 6);
+}
 
 // Function to apply a deadband filter
 void apply_deadband(float *x, float *y)
@@ -528,14 +545,14 @@ void loop()
     rotation[1] = constrain(boostRY * f_invRY * rotation[1], -1.0f, 1.0f);
     rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
-    // Last step is to convert values 
-    int16_t tx = 511 + (int16_t)(translation[0] * 512.0f);
-    int16_t ty = 511 + (int16_t)(translation[1] * 512.0f);
-    int16_t tz = 511 + (int16_t)(translation[2] * 512.0f);
+    // Last step is to convert values to HID values (-32767...32767)
+    int16_t tx = (int16_t)(translation[0] * 32767.0f);
+    int16_t ty = (int16_t)(translation[1] * 32767.0f);
+    int16_t tz = (int16_t)(translation[2] * 32767.0f);
 
-    int16_t rx = 511 + (int16_t)(rotation[0] * 512.0f);
-    int16_t ry = 511 + (int16_t)(rotation[1] * 512.0f);
-    int16_t rz = 511 + (int16_t)(rotation[2] * 512.0f);
+    int16_t rx = (int16_t)(rotation[0] * 32767.0f);
+    int16_t ry = (int16_t)(rotation[1] * 32767.0f);
+    int16_t rz = (int16_t)(rotation[2] * 32767.0f);
 
     // Serial.print("X: ");
     // Serial.println(tx);
@@ -544,16 +561,7 @@ void loop()
     // Send data to the 3DConnexion software.
     // SWAP order to match 
 
-
-    Joystick.setXAxis(tx);
-    Joystick.setYAxis(tz);
-    Joystick.setZAxis(ty);
-
-    Joystick.setRxAxis(rx);
-    Joystick.setRyAxis(rz);
-    Joystick.setRzAxis(ry);
-
-    Joystick.sendState();
+    send_command(rx, rz, ry, tx, tz, ty);
 
     delay(10);
 
@@ -566,16 +574,8 @@ void loop()
     // and normal joystick users... 
     // Make sure to disable when using outside
     // spacenavd environment.
+    //send_command(rx+1, rz+1, ry+1, tx+1, tz+1, ty+1);
 
-    // Joystick.setXAxis(tx+1);
-    // Joystick.setYAxis(tz+1);
-    // Joystick.setZAxis(ty+1);
-
-    // Joystick.setRxAxis(rx+1);
-    // Joystick.setRyAxis(rz+1);
-    // Joystick.setRzAxis(ry+1);
-
-    // Joystick.sendState();
 
     Serial.print(" TX: ");
     Serial.print(tx);
