@@ -570,59 +570,74 @@ void loop()
     rotation[1] = constrain(boostRY * f_invRY * rotation[1], -1.0f, 1.0f);
     rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
-    // Last step is to convert values to HID values (-32767...32767)
-    // int16_t tx = (int16_t)(translation[0] * 32767.0f);
-    // int16_t ty = (int16_t)(translation[1] * 32767.0f);
-    // int16_t tz = (int16_t)(translation[2] * 32767.0f);
 
-    // int16_t rx = (int16_t)(rotation[0] * 32767.0f);
-    // int16_t ry = (int16_t)(rotation[1] * 32767.0f);
-    // int16_t rz = (int16_t)(rotation[2] * 32767.0f);
+    const bool forLinuxDebug = true;
 
-    int16_t tx = (int16_t)(translation[0] * 1023.0f);
-    int16_t ty = (int16_t)(translation[1] * 1023.0f);
-    int16_t tz = (int16_t)(translation[2] * 1023.0f);
+    if (forLinuxDebug)
+    {
+        // Last step is to convert values 
+        int16_t tx = (int16_t)(translation[0] * 20000.0f);
+        int16_t ty = (int16_t)(translation[1] * 20000.0f);
+        int16_t tz = (int16_t)(translation[2] * 20000.0f);
 
-    int16_t rx = (int16_t)(rotation[0] * 1023.0f);
-    int16_t ry = (int16_t)(rotation[1] * 1023.0f);
-    int16_t rz = (int16_t)(rotation[2] * 1023.0f);
+        int16_t rx = (int16_t)(rotation[0] * 20000.0f);
+        int16_t ry = (int16_t)(rotation[1] * 20000.0f);
+        int16_t rz = (int16_t)(rotation[2] * 20000.0f);
+
+        // Send data to the 3DConnexion software.
+        // SWAP order to match 
+
+        send_command(rx, rz, ry, tx, tz, ty);
+
+        delay(10);
+
+        // This part is added when running on
+        // Linux with spacenavd. For some reason,
+        // not known to me, this does not work
+        // unless you "change" the values. You need
+        // to keep sending different values for it to
+        // trigger. This is not needed on Windows, 
+        // and normal joystick users... 
+        // Make sure to disable when using outside
+        // spacenavd environment.
+        send_command(rx+1, rz+1, ry+1, tx+1, tz+1, ty+1);
+
+    }
+    else
+    {
+        int16_t tx = (int16_t)(translation[0] * 1023.0f);
+        int16_t ty = (int16_t)(translation[1] * 1023.0f);
+        int16_t tz = (int16_t)(translation[2] * 1023.0f);
+
+        int16_t rx = (int16_t)(rotation[0] * 1023.0f);
+        int16_t ry = (int16_t)(rotation[1] * 1023.0f);
+        int16_t rz = (int16_t)(rotation[2] * 1023.0f);
+
+        // Send data to the 3DConnexion software.
+        // SWAP order to match 
+
+        send_command(rx, rz, ry, tx, tz, ty);
+
+        delay(10);
+    }
 
     // Serial.print("X: ");
     // Serial.println(tx);
 
-
-    // Send data to the 3DConnexion software.
-    // SWAP order to match 
-
-    send_command(rx, rz, ry, tx, tz, ty);
-
-    delay(10);
-
-    // This part is added when running on
-    // Linux with spacenavd. For some reason,
-    // not known to me, this does not work
-    // unless you "change" the values. You need
-    // to keep sending different values for it to
-    // trigger. This is not needed on Windows, 
-    // and normal joystick users... 
-    // Make sure to disable when using outside
-    // spacenavd environment.
-    //send_command(rx+1, rz+1, ry+1, tx+1, tz+1, ty+1);
-
     if (state.is_moving)
     {
         Serial.print(" TX: ");
-        Serial.print(tx);
+        Serial.print(translation[0]);
         Serial.print(" TY: ");
-        Serial.print(ty);
+        Serial.print(translation[1]);
         Serial.print(" TZ: ");
-        Serial.print(tz);
+        Serial.print(translation[2]);
         Serial.print(" RX: ");
-        Serial.print(rx);
+        Serial.print(rotation[0]);
         Serial.print(" RY: ");
-        Serial.print(ry);
+        Serial.print(rotation[1]);
         Serial.print(" RZ: ");
-        Serial.print(rz);
+        Serial.print(rotation[2]);
         Serial.println("");
     }
     //Serial.print("                                                          \r");
