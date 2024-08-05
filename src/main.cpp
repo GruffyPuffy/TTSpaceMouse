@@ -92,16 +92,16 @@ const float f_invRY = -1.0f; // Rotate around Y axis (tilt left/right)
 const float f_invRZ = -1.0f; // Rotate around Z axis (twist left/right)
 
 // Change this value to decrease/increase speed of movment.
-const float allBoost = 0.02f;
+const float allBoost = 0.2f;
 
 // Apply different speed factors for all directions/translations
-const float boostTX = 0.8f*allBoost;
-const float boostTY = 0.8f*allBoost;
-const float boostTZ = 1.0f*allBoost;
+const float boostTX = 0.4f*allBoost;
+const float boostTY = 0.4f*allBoost;
+const float boostTZ = 0.8f*allBoost;
 
-const float boostRX = 0.4f*allBoost;
-const float boostRY = 0.4f*allBoost;
-const float boostRZ = 0.4f*allBoost;
+const float boostRX = 1.8f*allBoost;
+const float boostRY = 1.8f*allBoost;
+const float boostRZ = 2.8f*allBoost;
 
 // Deadband threshold
 //#define DEADBAND_THRESHOLD 0.05f
@@ -109,7 +109,7 @@ const float boostRZ = 0.4f*allBoost;
 #define DEADBAND_THRESHOLD 0.0f
 
 // Low-pass filter constants
-#define ALPHA 0.1f // Smoothing factor (0 < ALPHA < 1)
+#define ALPHA 0.4f // Smoothing factor (0 < ALPHA < 1)
 
 // Movement state for tracking previous movements and rotations
 typedef struct
@@ -291,7 +291,7 @@ void calculate_translation_rotation(const float joystick_inputs[4][2], float tra
 bool is_significant_move(bool last_significant_state, float current, float last, float threshold) 
 {
     // Very small moves 
-    if ((last_significant_state) && (fabs(current - last) == 0.0f))
+    if ((last_significant_state) && (fabs(current - last) < 0.001f))
     {
         // Keep locked in same move, if not any change on joy values
         return last_significant_state;
@@ -398,7 +398,7 @@ void loop()
     calculate_translation_rotation(joystick_inputs, translation, rotation);
 
     int mode = 1;
-    float damp = 0.1f;
+    float damp = 0.01f;
 
     if (mode == 1)
     {
@@ -410,19 +410,19 @@ void loop()
         {
             Serial.print("Moving: ");
             // Check which types of movements were significant
-            if (state.translation_significant[0])
+            //if (state.translation_significant[0])
             {
                 Serial.print(" TX:");
                 //Serial.print(state.last_translation[0]);
                 Serial.print(translation[0]);
             }
-            if (state.translation_significant[1])
+            //if (state.translation_significant[1])
             {
                 Serial.print(" TY:");
                 //Serial.print(state.last_translation[1]);
                 Serial.print(translation[1]);
             }
-            if (state.translation_significant[2])
+            //if (state.translation_significant[2])
             {
                 Serial.print(" TZ:");
                 //Serial.print(state.last_translation[2]);
@@ -430,19 +430,19 @@ void loop()
             }
 
 
-            if (state.rotation_significant[0])
+            //if (state.rotation_significant[0])
             {
                 Serial.print(" RX:");
                 //Serial.print(state.last_rotation[0]);
                 Serial.print(rotation[0]);
             }
-            if (state.rotation_significant[1])
+            //if (state.rotation_significant[1])
             {
                 Serial.print(" RY:");
                 //Serial.print(state.last_rotation[1]);
                 Serial.print(rotation[1]);
             }
-            if (state.rotation_significant[2])
+            //if (state.rotation_significant[2])
             {
                 Serial.print(" RZ:");
                 //Serial.print(state.last_rotation[2]);
@@ -501,8 +501,8 @@ void loop()
             {
                 Serial.print(" ---> MIX (should not come here...)");
             }
-            Serial.println("");
-            Serial.print("MOVE");
+            //Serial.println("");
+            //Serial.print("MOVE");
         }
         else
         {
@@ -522,9 +522,34 @@ void loop()
                     rotation[i] = 0.0f;
                 }
             }
-            Serial.print("CONT");
+            //Serial.print("CONT");
         }
     }
+
+
+    // Check if jumps (joystick quite in-accurate)
+/*
+    for (int i=0; i<3; i++)
+    {
+        if (fabs(translation[i] - last_translation[i]) > 0.30f)
+        {
+            last_translation[i] = translation[i]*0.1f;
+        }
+        else
+        {
+            last_translation[i] = translation[i];
+        }
+
+        if (fabs(rotation[i] - last_rotation[i]) > 0.30f)
+        {
+            last_rotation[i] = rotation[i]*0.1f;
+        }
+        else
+        {
+            last_rotation[i] = rotation[i];
+        }
+    }
+*/
 
     // Save for next update
     last_translation[0] = translation[0];
@@ -546,13 +571,21 @@ void loop()
     rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
     // Last step is to convert values to HID values (-32767...32767)
-    int16_t tx = (int16_t)(translation[0] * 32767.0f);
-    int16_t ty = (int16_t)(translation[1] * 32767.0f);
-    int16_t tz = (int16_t)(translation[2] * 32767.0f);
+    // int16_t tx = (int16_t)(translation[0] * 32767.0f);
+    // int16_t ty = (int16_t)(translation[1] * 32767.0f);
+    // int16_t tz = (int16_t)(translation[2] * 32767.0f);
 
-    int16_t rx = (int16_t)(rotation[0] * 32767.0f);
-    int16_t ry = (int16_t)(rotation[1] * 32767.0f);
-    int16_t rz = (int16_t)(rotation[2] * 32767.0f);
+    // int16_t rx = (int16_t)(rotation[0] * 32767.0f);
+    // int16_t ry = (int16_t)(rotation[1] * 32767.0f);
+    // int16_t rz = (int16_t)(rotation[2] * 32767.0f);
+
+    int16_t tx = (int16_t)(translation[0] * 1023.0f);
+    int16_t ty = (int16_t)(translation[1] * 1023.0f);
+    int16_t tz = (int16_t)(translation[2] * 1023.0f);
+
+    int16_t rx = (int16_t)(rotation[0] * 1023.0f);
+    int16_t ry = (int16_t)(rotation[1] * 1023.0f);
+    int16_t rz = (int16_t)(rotation[2] * 1023.0f);
 
     // Serial.print("X: ");
     // Serial.println(tx);
@@ -576,20 +609,23 @@ void loop()
     // spacenavd environment.
     //send_command(rx+1, rz+1, ry+1, tx+1, tz+1, ty+1);
 
-
-    Serial.print(" TX: ");
-    Serial.print(tx);
-    Serial.print(" TY: ");
-    Serial.print(ty);
-    Serial.print(" TZ: ");
-    Serial.print(tz);
-    Serial.print(" RX: ");
-    Serial.print(rx);
-    Serial.print(" RY: ");
-    Serial.print(ry);
-    Serial.print(" RZ: ");
-    Serial.print(rz);
-    Serial.print("                                                          \r");
+    if (state.is_moving)
+    {
+        Serial.print(" TX: ");
+        Serial.print(tx);
+        Serial.print(" TY: ");
+        Serial.print(ty);
+        Serial.print(" TZ: ");
+        Serial.print(tz);
+        Serial.print(" RX: ");
+        Serial.print(rx);
+        Serial.print(" RY: ");
+        Serial.print(ry);
+        Serial.print(" RZ: ");
+        Serial.print(rz);
+        Serial.println("");
+    }
+    //Serial.print("                                                          \r");
 
 
 }
