@@ -104,9 +104,7 @@ const float boostRY = 1.8f*allBoost;
 const float boostRZ = 2.8f*allBoost;
 
 // Deadband threshold
-//#define DEADBAND_THRESHOLD 0.05f
-// Disabled for now
-#define DEADBAND_THRESHOLD 0.0f
+#define DEADBAND_THRESHOLD 0.00f
 
 // Low-pass filter constants
 #define ALPHA 0.4f // Smoothing factor (0 < ALPHA < 1)
@@ -114,11 +112,9 @@ const float boostRZ = 2.8f*allBoost;
 // Movement state for tracking previous movements and rotations
 typedef struct
 {
-    float last_translation[3];
-    float last_rotation[3];
-    bool translation_significant[3]; // Flags for translation (X, Y, Z)
-    bool rotation_significant[3];    // Flags for rotation (X, Y, Z)
-    bool is_moving;
+    float translation_detected[3];
+    float rotation_detected[3];
+
 } MovementState;
 
 
@@ -287,69 +283,46 @@ void calculate_translation_rotation(const float joystick_inputs[4][2], float tra
     rotation[2] = total_torque[2] / 4; // Averaging the rotation around Z-axis
 }
 
-// Function to detect significant movement
-bool is_significant_move(bool last_significant_state, float current, float last, float threshold) 
+void detect_type_of_move(const float translation[3], const float rotation[3], MovementState *state)
 {
-    // Very small moves 
-    if ((last_significant_state) && (fabs(current - last) < 0.001f))
+    const float trans_detect[3] = {0.05f, 0.05f, 0.25f};
+    const float rot_detect[3] = {0.05f, 0.05f, 0.10f};
+
+    for (int t=0; t<3; t++)
     {
-        // Keep locked in same move, if not any change on joy values
-        return last_significant_state;
+        if (fabs(translation[t]) > trans_detect[t])
+        {
+            state->translation_detected[t] = 1.0;
+        }
+        else
+        {
+            state->translation_detected[t] -= 0.01;
+        }
+
+        state->translation_detected[t] = constrain(state->translation_detected[t], 0.0f, 1.0f);
+
     }
-    else
+
+    for (int r=0; r<3; r++)
     {
-        return fabs(current - last) > threshold;
+        if (fabs(rotation[r]) > rot_detect[r])
+        {
+            state->rotation_detected[r] = 1.0;
+        }
+        else
+        {
+            state->rotation_detected[r] -= 0.01;
+        }
+
+        state->rotation_detected[r] = constrain(state->rotation_detected[r], 0.0f, 1.0f);
     }
-}
 
-// Function to detect and consolidate movements
-void detect_and_consolidate_move(const float translation[3], const float rotation[3], MovementState *state)
-{
-
-    bool translation_significant[3] = {
-        is_significant_move(state->translation_significant[0], translation[0], state->last_translation[0], trans_threshold[0]),
-        is_significant_move(state->translation_significant[1], translation[1], state->last_translation[1], trans_threshold[1]),
-        is_significant_move(state->translation_significant[2], translation[2], state->last_translation[2], trans_threshold[2])};
-
-    bool rotation_significant[3] = {
-        is_significant_move(state->rotation_significant[0], rotation[0], state->last_rotation[0], rot_threshold[0]),
-        is_significant_move(state->rotation_significant[1], rotation[1], state->last_rotation[1], rot_threshold[1]),
-        is_significant_move(state->rotation_significant[2], rotation[2], state->last_rotation[2], rot_threshold[2])};
-
-    // Update significant flags
-    state->translation_significant[0] = translation_significant[0];
-    state->translation_significant[1] = translation_significant[1];
-    state->translation_significant[2] = translation_significant[2];
-    state->rotation_significant[0] = rotation_significant[0];
-    state->rotation_significant[1] = rotation_significant[1];
-    state->rotation_significant[2] = rotation_significant[2];
-
-    // If any significant movement or rotation is detected
-    if (translation_significant[0] || translation_significant[1] || translation_significant[2] ||
-        rotation_significant[0] || rotation_significant[1] || rotation_significant[2])
-    {
-        // Update state with current values
-        state->last_translation[0] = translation[0];
-        state->last_translation[1] = translation[1];
-        state->last_translation[2] = translation[2];
-        state->last_rotation[0] = rotation[0];
-        state->last_rotation[1] = rotation[1];
-        state->last_rotation[2] = rotation[2];
-
-        state->is_moving = true;
-    }
-    else
-    {
-        state->is_moving = false;
-    }
 }
 
 void loop()
 {
     // Static to keep between loop() calls
     static MovementState state;
-    static float last_translation[3];
-    static float last_rotation[3];
 
     // Internals
     // Scale [0...1023]
@@ -397,168 +370,106 @@ void loop()
     // Convert from Joystick to translation/rotation
     calculate_translation_rotation(joystick_inputs, translation, rotation);
 
-    int mode = 1;
-    float damp = 0.01f;
+    const float trans_threshold[3] = {0.75f, 0.75f, 0.75f};
+    const float rot_threshold[3] = {0.75f, 0.75f, 0.75f};
 
-    if (mode == 1)
+    detect_type_of_move(translation, rotation, &state);
+
+    Serial.print("Moving: ");
+
+    //if (state.translation_detected[0] > trans_threshold[0])
     {
-        // Detect and consolidate significant movements
-        detect_and_consolidate_move(translation, rotation, &state);
-
-        // Use the filtered translation and rotation from the state
-        if (state.is_moving)
-        {
-            Serial.print("Moving: ");
-            // Check which types of movements were significant
-            //if (state.translation_significant[0])
-            {
-                Serial.print(" TX:");
-                //Serial.print(state.last_translation[0]);
-                Serial.print(translation[0]);
-            }
-            //if (state.translation_significant[1])
-            {
-                Serial.print(" TY:");
-                //Serial.print(state.last_translation[1]);
-                Serial.print(translation[1]);
-            }
-            //if (state.translation_significant[2])
-            {
-                Serial.print(" TZ:");
-                //Serial.print(state.last_translation[2]);
-                Serial.print(translation[2]);
-            }
-
-
-            //if (state.rotation_significant[0])
-            {
-                Serial.print(" RX:");
-                //Serial.print(state.last_rotation[0]);
-                Serial.print(rotation[0]);
-            }
-            //if (state.rotation_significant[1])
-            {
-                Serial.print(" RY:");
-                //Serial.print(state.last_rotation[1]);
-                Serial.print(rotation[1]);
-            }
-            //if (state.rotation_significant[2])
-            {
-                Serial.print(" RZ:");
-                //Serial.print(state.last_rotation[2]);
-                Serial.print(rotation[2]);
-            }
-
-            translation[0] = state.last_translation[0];
-            translation[1] = state.last_translation[1];
-            translation[2] = state.last_translation[2];
-
-            rotation[0] = state.last_rotation[0];
-            rotation[1] = state.last_rotation[1];
-            rotation[2] = state.last_rotation[2];
-
-            // Apply priority 
-            if (state.translation_significant[2])
-            {
-                translation[0] = damp * translation[0];
-                translation[1] = damp * translation[1];
-
-                rotation[0] = damp * rotation[0];
-                rotation[1] = damp * rotation[1];
-                rotation[2] = damp * rotation[2];
-                Serial.print(" ---> PUSH/PULL");
-            }
-            else if (state.rotation_significant[2])
-            {
-                translation[0] = damp * translation[0];
-                translation[1] = damp * translation[1];
-                translation[2] = damp * translation[2];
-
-                rotation[0] = damp * rotation[0];
-                rotation[1] = damp * rotation[1];
-                Serial.print(" ---> TWIST");
-            }
-            else if ((state.rotation_significant[0]) || (state.rotation_significant[1]))
-            {
-                translation[0] = damp * translation[0];
-                translation[1] = damp * translation[1];
-                translation[2] = damp * translation[2];
-
-                rotation[2] = damp * rotation[2];
-                Serial.print(" ---> ROTATION");
-            }
-            else if ((state.translation_significant[0]) || (state.translation_significant[1]))
-            {
-                translation[2] = damp * translation[2];
-
-                rotation[0] = damp * rotation[0];
-                rotation[1] = damp * rotation[1];
-                rotation[2] = damp * rotation[2];
-
-                Serial.print(" ---> TRANSLATION");
-            }
-            else
-            {
-                Serial.print(" ---> MIX (should not come here...)");
-            }
-            //Serial.println("");
-            //Serial.print("MOVE");
-        }
-        else
-        {
-            // Continue move 
-            for (int i = 0; i < 3; i++)
-            {
-                translation[i] = last_translation[i];
-                rotation[i] = last_rotation[i];
-
-                // Stop movement if low moves...
-                if (fabs(translation[i]) < 0.1f)
-                {
-                    translation[i] = 0.0f;
-                }
-                if (fabs(rotation[i]) < 0.1f)
-                {
-                    rotation[i] = 0.0f;
-                }
-            }
-            //Serial.print("CONT");
-        }
+        Serial.print(" TX:");
+        //Serial.print(state.last_translation[0]);
+        Serial.print(translation[0]);
+    }
+    //if (state.translation_detected[1] > trans_threshold[1])
+    {
+        Serial.print(" TY:");
+        //Serial.print(state.last_translation[1]);
+        Serial.print(translation[1]);
+    }
+    //if (state.translation_detected[2] > trans_threshold[2])
+    {
+        Serial.print(" TZ:");
+        //Serial.print(state.last_translation[2]);
+        Serial.print(translation[2]);
     }
 
 
-    // Check if jumps (joystick quite in-accurate)
-/*
-    for (int i=0; i<3; i++)
+    //if (state.rotation_detected[0] > rot_threshold[0])
     {
-        if (fabs(translation[i] - last_translation[i]) > 0.30f)
-        {
-            last_translation[i] = translation[i]*0.1f;
-        }
-        else
-        {
-            last_translation[i] = translation[i];
-        }
-
-        if (fabs(rotation[i] - last_rotation[i]) > 0.30f)
-        {
-            last_rotation[i] = rotation[i]*0.1f;
-        }
-        else
-        {
-            last_rotation[i] = rotation[i];
-        }
+        Serial.print(" RX:");
+        //Serial.print(state.last_rotation[0]);
+        Serial.print(rotation[0]);
     }
-*/
+    //if (state.rotation_detected[1] > rot_threshold[1])
+    {
+        Serial.print(" RY:");
+        //Serial.print(state.last_rotation[1]);
+        Serial.print(rotation[1]);
+    }
+    //if (state.rotation_detected[2] > rot_threshold[2])
+    {
+        Serial.print(" RZ:");
+        //Serial.print(state.last_rotation[2]);
+        Serial.print(rotation[2]);
+    }
 
-    // Save for next update
-    last_translation[0] = translation[0];
-    last_translation[1] = translation[1];
-    last_translation[2] = translation[2];
+    // Apply priority 
+    if (state.translation_detected[2] > trans_threshold[2])
+    {
+        float damp = 0.0f;
 
-    last_rotation[0] = rotation[0];
-    last_rotation[1] = rotation[1];
-    last_rotation[2] = rotation[2];
+        translation[0] = damp * translation[0];
+        translation[1] = damp * translation[1];
+
+        rotation[0] = damp * rotation[0];
+        rotation[1] = damp * rotation[1];
+        rotation[2] = damp * rotation[2];
+        Serial.print(" ---> PUSH/PULL");
+    }
+    else if (state.rotation_detected[2] > rot_threshold[2])
+    {
+        float damp = 0.02f;
+
+        translation[0] = damp * translation[0];
+        translation[1] = damp * translation[1];
+        translation[2] = damp * translation[2];
+
+        rotation[0] = damp * rotation[0];
+        rotation[1] = damp * rotation[1];
+        Serial.print(" ---> TWIST");
+    }
+    else if ((state.rotation_detected[0] > rot_threshold[0]) || (state.rotation_detected[1] > rot_threshold[1]))
+    {
+        float damp = 0.20f;
+
+        translation[0] = damp * translation[0];
+        translation[1] = damp * translation[1];
+        translation[2] = damp * translation[2];
+
+        rotation[2] = damp * rotation[2];
+        Serial.print(" ---> ROTATION");
+    }
+    else if ((state.translation_detected[0] > trans_threshold[0]) || (state.translation_detected[1] > trans_threshold[1]))
+    {
+        float damp = 0.20f;
+
+        translation[2] = damp * translation[2];
+
+        rotation[0] = damp * rotation[0];
+        rotation[1] = damp * rotation[1];
+        rotation[2] = damp * rotation[2];
+
+        Serial.print(" ---> TRANSLATION");
+    }
+    else
+    {
+        Serial.print(" ---> IDLE");
+    }
+
+    Serial.println();
 
     // Boost some values as we are not using the full range of the joysticks (some times)
     // Boost and invert any results
@@ -620,27 +531,5 @@ void loop()
 
         delay(10);
     }
-
-    // Serial.print("X: ");
-    // Serial.println(tx);
-
-    if (state.is_moving)
-    {
-        Serial.print(" TX: ");
-        Serial.print(translation[0]);
-        Serial.print(" TY: ");
-        Serial.print(translation[1]);
-        Serial.print(" TZ: ");
-        Serial.print(translation[2]);
-        Serial.print(" RX: ");
-        Serial.print(rotation[0]);
-        Serial.print(" RY: ");
-        Serial.print(rotation[1]);
-        Serial.print(" RZ: ");
-        Serial.print(rotation[2]);
-        Serial.println("");
-    }
-    //Serial.print("                                                          \r");
-
 
 }
