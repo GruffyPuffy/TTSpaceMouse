@@ -557,16 +557,25 @@ void loop()
 
     delay(10);
 
-    Joystick.setXAxis(tx+1);
-    Joystick.setYAxis(tz+1);
-    Joystick.setZAxis(ty+1);
+    // This part is added when running on
+    // Linux with spacenavd. For some reason,
+    // not known to me, this does not work
+    // unless you "change" the values. You need
+    // to keep sending different values for it to
+    // trigger. This is not needed on Windows, 
+    // and normal joystick users... 
+    // Make sure to disable when using outside
+    // spacenavd environment.
 
-    Joystick.setRxAxis(rx+1);
-    Joystick.setRyAxis(rz+1);
-    Joystick.setRzAxis(ry+1);
+    // Joystick.setXAxis(tx+1);
+    // Joystick.setYAxis(tz+1);
+    // Joystick.setZAxis(ty+1);
 
-    Joystick.sendState();
+    // Joystick.setRxAxis(rx+1);
+    // Joystick.setRyAxis(rz+1);
+    // Joystick.setRzAxis(ry+1);
 
+    // Joystick.sendState();
 
     Serial.print(" TX: ");
     Serial.print(tx);
