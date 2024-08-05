@@ -92,7 +92,7 @@ const float f_invRY = -1.0f; // Rotate around Y axis (tilt left/right)
 const float f_invRZ = -1.0f; // Rotate around Z axis (twist left/right)
 
 // Change this value to decrease/increase speed of movment.
-const float allBoost = 0.2f;
+const float allBoost = 0.02f;
 
 // Apply different speed factors for all directions/translations
 const float boostTX = 0.8f*allBoost;
