@@ -419,19 +419,24 @@ void loop()
     // Apply priority 
     if (state.translation_detected[2] > trans_threshold[2])
     {
-        float damp = 0.0f;
+        // If we detect PUSH/PULL, cancel X/Y movements much
+        float damp = 0.05f;
 
         translation[0] = damp * translation[0];
         translation[1] = damp * translation[1];
 
         rotation[0] = damp * rotation[0];
         rotation[1] = damp * rotation[1];
+
+        // Somewhat remove other movements to enhance "lock into"
+        damp = 0.20f;
         rotation[2] = damp * rotation[2];
         Serial.print(" ---> PUSH/PULL");
     }
     else if (state.rotation_detected[2] > rot_threshold[2])
     {
-        float damp = 0.02f;
+        // If we detect a TWIST motion, cancel all others to enhance "lock in"
+        float damp = 0.05f;
 
         translation[0] = damp * translation[0];
         translation[1] = damp * translation[1];
@@ -443,23 +448,33 @@ void loop()
     }
     else if ((state.rotation_detected[0] > rot_threshold[0]) || (state.rotation_detected[1] > rot_threshold[1]))
     {
-        float damp = 0.20f;
+        // If we detect X/Y rotation, cancel out translation X/Y as these have almost the same movement
+        // and user likely not trying both at same time
+
+        float damp = 0.05f;
 
         translation[0] = damp * translation[0];
         translation[1] = damp * translation[1];
-        translation[2] = damp * translation[2];
 
+        // Somewhat remove other movements to enhance "lock into"
+        damp = 0.20f;
+        translation[2] = damp * translation[2];
         rotation[2] = damp * rotation[2];
+
         Serial.print(" ---> ROTATION");
     }
     else if ((state.translation_detected[0] > trans_threshold[0]) || (state.translation_detected[1] > trans_threshold[1]))
     {
-        float damp = 0.20f;
+        // If we detect X/Y translation, cancel out rotation X/Y as these have almost the same movement
+        // and user likely not trying both at same time
 
-        translation[2] = damp * translation[2];
-
+        float damp = 0.05f;
         rotation[0] = damp * rotation[0];
         rotation[1] = damp * rotation[1];
+
+        // Somewhat remove other movements to enhance "lock into"
+        damp = 0.20f;
+        translation[2] = damp * translation[2];
         rotation[2] = damp * rotation[2];
 
         Serial.print(" ---> TRANSLATION");
@@ -482,7 +497,7 @@ void loop()
     rotation[2] = constrain(boostRZ * f_invRZ * rotation[2], -1.0f, 1.0f);
 
 
-    const bool forLinuxDebug = true;
+    const bool forLinuxDebug = false;
 
     if (forLinuxDebug)
     {
